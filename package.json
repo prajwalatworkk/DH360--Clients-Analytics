@@ -1,0 +1,15 @@
+{
+  "name": "client-reports",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pull Meta Ads, Google Ads and Sheet leads for every client into one HTML report.",
+  "scripts": {
+    "start": "node server.js",
+    "report": "node index.js",
+    "week": "node index.js --days 7",
+    "month": "node index.js --days 30",
+    "google:auth": "node scripts/google-oauth-setup.js"
+  },
+  "engines": { "node": ">=18" }
+}

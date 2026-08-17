@@ -1,0 +1,850 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Client Reports · DigitalHub360</title>
+
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#FFFFFF">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="icon" href="/icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Client Reports">
+<style>
+  /* Light theme only — the brand reads best on white, and the report it produces
+     is printed on white too. Declaring color-scheme stops the OS from tinting
+     native controls (date pickers, scrollbars) dark. */
+  :root {
+    color-scheme: light;
+
+    /* Brand, sampled from the Digital Hub 360 logo */
+    --navy:#0B3C91; --navy-deep:#082C6D; --navy-lift:#1450BE;
+    --red:#E31B37; --orange:#F0A020;
+
+    --bg:#F5F7FA;
+    --surface:#FFFFFF;
+    --surface-sunken:#F8FAFC;
+    --ink:#0D1420;
+    --ink-soft:#44506A;
+    --muted:#7A8699;
+    --line:#E6EAF1;
+    --line-strong:#D4DBE6;
+
+    --danger:#C0392B;
+
+    --ring:0 0 0 3px rgba(11,60,145,.16);
+    --shadow-sm:0 1px 2px rgba(13,20,32,.04), 0 1px 3px rgba(13,20,32,.03);
+    --shadow-md:0 2px 4px rgba(13,20,32,.03), 0 8px 20px -6px rgba(13,20,32,.09);
+    --shadow-lg:0 14px 36px -10px rgba(13,20,32,.16), 0 4px 10px rgba(13,20,32,.05);
+    --shadow-brand:0 6px 16px -5px rgba(11,60,145,.34);
+
+    --r-sm:10px; --r-md:14px; --r-lg:18px; --r-pill:999px;
+  }
+
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html { -webkit-text-size-adjust:100%; background:var(--bg); }
+  body {
+    margin:0;
+    padding:0 0 calc(56px + env(safe-area-inset-bottom));
+    background:var(--bg);
+    color:var(--ink);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Inter,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+  .wrap { max-width:660px; margin:0 auto; padding:0 18px; }
+  :focus-visible { outline:none; box-shadow:var(--ring); border-radius:var(--r-sm); }
+
+  /* ---------- Masthead: white, so the logo shows in its true colours ---------- */
+  .masthead {
+    position:relative; background:var(--surface);
+    padding:calc(20px + env(safe-area-inset-top)) 0 20px;
+    margin-bottom:24px; box-shadow:var(--shadow-sm);
+  }
+  /* The logo's three colours as a hairline rule */
+  .masthead::after {
+    content:''; position:absolute; left:0; right:0; bottom:0; height:3px;
+    background:linear-gradient(90deg, var(--navy) 0%, var(--navy) 34%,
+                                      var(--orange) 34%, var(--orange) 67%,
+                                      var(--red) 67%, var(--red) 100%);
+  }
+  .brand { display:flex; align-items:center; gap:14px; }
+  .brand-mark { width:52px; height:52px; flex:none; display:block; }
+  .wordmark {
+    font-size:25px; font-weight:780; line-height:.98; letter-spacing:-.032em;
+    color:var(--navy);
+  }
+  .wordmark-360 { color:var(--red); }
+  .masthead .sub {
+    margin:12px 0 0; font-size:13.5px; line-height:1.45; color:var(--muted); max-width:46ch;
+  }
+
+  /* ---------- Cards ---------- */
+  .card {
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--r-lg);
+    padding:20px; margin-bottom:16px; box-shadow:var(--shadow-sm);
+  }
+  .card h2 {
+    font-size:11px; text-transform:uppercase; letter-spacing:.1em; font-weight:700;
+    color:var(--muted); margin:0 0 14px;
+  }
+  .card-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+  .refresh {
+    display:inline-flex; align-items:center; gap:6px; background:var(--surface-sunken);
+    border:1px solid var(--line-strong); color:var(--ink-soft); border-radius:var(--r-pill);
+    padding:6px 12px; font:inherit; font-size:11.5px; font-weight:600; cursor:pointer;
+    min-height:32px; margin-top:-4px; white-space:nowrap;
+    transition:border-color .15s ease, color .15s ease;
+  }
+  .refresh:hover { border-color:var(--navy); color:var(--navy); }
+  .refresh:disabled { opacity:.6; cursor:progress; }
+  .refresh-icon { font-size:14px; line-height:1; display:inline-block; }
+  .refresh.spinning .refresh-icon { animation:spin .8s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .refresh.spinning .refresh-icon { animation:none; } }
+
+  /* ---------- Segmented control ---------- */
+  #platform-tabs {
+    display:inline-flex; gap:4px; padding:4px; margin:0 0 14px;
+    background:var(--surface-sunken); border:1px solid var(--line); border-radius:var(--r-pill);
+  }
+  #platform-tabs .preset {
+    border:1px solid transparent; background:transparent; color:var(--ink-soft);
+    border-radius:var(--r-pill); padding:8px 18px; font-size:13.5px; font-weight:600;
+    cursor:pointer; min-height:36px; transition:color .15s ease, background .15s ease;
+  }
+  #platform-tabs .preset:hover { color:var(--ink); }
+  #platform-tabs .preset[aria-pressed="true"] {
+    background:var(--surface); color:var(--navy);
+    box-shadow:var(--shadow-sm); border-color:var(--line);
+  }
+
+  /* ---------- Accounts dropdown ---------- */
+  .dropdown { position:relative; }
+  .dropdown-toggle {
+    width:100%; display:flex; align-items:center; justify-content:space-between; gap:10px;
+    background:var(--surface-sunken); border:1px solid var(--line-strong); color:var(--ink);
+    border-radius:var(--r-md); padding:14px 16px; font:inherit; font-size:15px;
+    text-align:left; cursor:pointer; min-height:52px;
+    transition:border-color .15s ease, box-shadow .15s ease, background .15s ease;
+  }
+  .dropdown-toggle:hover { border-color:var(--navy); background:var(--surface); }
+  .dropdown-toggle[aria-expanded="true"] {
+    border-color:var(--navy); background:var(--surface);
+    border-radius:var(--r-md) var(--r-md) 0 0; box-shadow:var(--shadow-sm);
+  }
+  .dropdown-toggle .chevron {
+    color:var(--muted); flex:none; font-size:11px;
+    transition:transform .2s cubic-bezier(.4,0,.2,1);
+  }
+  .dropdown-toggle[aria-expanded="true"] .chevron { transform:rotate(180deg); color:var(--navy); }
+  .dropdown-summary { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:550; }
+  .dropdown-summary.placeholder { color:var(--muted); font-weight:400; }
+
+  .dropdown-panel {
+    position:absolute; left:0; right:0; top:100%; z-index:30;
+    background:var(--surface); border:1px solid var(--navy); border-top:none;
+    border-radius:0 0 var(--r-md) var(--r-md); box-shadow:var(--shadow-lg);
+    max-height:min(58vh, 460px); overflow-y:auto; padding:8px;
+    -webkit-overflow-scrolling:touch;
+  }
+  .dropdown-panel[hidden] { display:none; }
+
+  .platform { margin-bottom:12px; }
+  .platform:last-child { margin-bottom:2px; }
+  .platform-head { display:flex; align-items:center; justify-content:space-between; padding:6px 8px 10px; }
+  .platform-name {
+    font-weight:700; font-size:10.5px; color:var(--muted);
+    text-transform:uppercase; letter-spacing:.09em;
+  }
+  .link {
+    background:none; border:none; color:var(--navy); cursor:pointer;
+    font-size:13px; padding:4px 2px; font-weight:650;
+  }
+  .link:hover { text-decoration:underline; }
+
+  .account-row {
+    border:1px solid var(--line); border-radius:var(--r-md); margin:0 2px 7px;
+    transition:border-color .15s ease, box-shadow .15s ease;
+  }
+  .account-row:hover { border-color:var(--line-strong); }
+  .account-row.open { border-color:var(--navy); box-shadow:var(--shadow-sm); }
+  label.account {
+    display:flex; align-items:center; gap:11px; padding:12px; cursor:pointer;
+    margin:0; flex-wrap:wrap;
+  }
+  label.account input { accent-color:var(--navy); width:18px; height:18px; flex:none; }
+  .account-name { flex:1; min-width:110px; font-weight:550; }
+  .disclosure {
+    background:var(--surface-sunken); border:1px solid var(--line); color:var(--ink-soft);
+    cursor:pointer; font-size:12px; font-weight:600; padding:6px 11px;
+    border-radius:var(--r-pill); min-height:32px;
+    transition:color .15s ease, border-color .15s ease;
+  }
+  .disclosure:hover { color:var(--navy); border-color:var(--navy); }
+
+  .campaigns { border-top:1px solid var(--line); padding:10px 12px 12px 40px; }
+  .campaigns .bulk { display:flex; gap:16px; margin-bottom:6px; }
+  label.campaign {
+    display:flex; align-items:center; gap:10px; padding:7px 0;
+    font-size:13.5px; cursor:pointer; color:var(--ink-soft);
+  }
+  label.campaign:hover { color:var(--ink); }
+  label.campaign input { accent-color:var(--navy); width:15px; height:15px; flex:none; }
+  .campaign-name { flex:1; }
+  .paused {
+    font-size:10.5px; font-weight:600; color:var(--muted); background:var(--surface-sunken);
+    border:1px solid var(--line); border-radius:var(--r-pill); padding:2px 8px; flex:none;
+    text-transform:uppercase; letter-spacing:.04em;
+  }
+
+  .picked {
+    color:var(--navy); font-size:11.5px; font-weight:650; flex:none;
+    background:rgba(11,60,145,.09); padding:3px 9px; border-radius:var(--r-pill);
+  }
+  .picked:empty { display:none; }
+  .account-meta { color:var(--muted); font-size:11.5px; font-variant-numeric:tabular-nums; flex:none; }
+  .fund-badge {
+    font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:var(--r-pill);
+    flex:none; text-transform:uppercase; letter-spacing:.03em; white-space:nowrap;
+  }
+  button.fund-badge { cursor:pointer; font-family:inherit; }
+  button.fund-badge:hover { filter:brightness(.96); }
+  .fund-badge.ok { color:var(--ink-soft); background:var(--surface-sunken); border:1px solid var(--line-strong); }
+  .fund-pencil {
+    background:transparent; border:none; color:var(--muted); cursor:pointer;
+    font-size:13px; padding:2px 4px; border-radius:6px; flex:none; line-height:1;
+  }
+  .fund-pencil:hover { color:var(--navy); background:var(--surface-sunken); }
+  .fund-badge.low { color:#8A5200; background:rgba(240,160,32,.16); border:1px solid rgba(240,160,32,.5); }
+  .fund-badge.empty { color:#fff; background:var(--red); border:1px solid var(--red); }
+  .badge {
+    font-size:10.5px; padding:2px 8px; border-radius:var(--r-pill);
+    border:1px solid var(--line); color:var(--muted); flex:none;
+  }
+  .loading, .empty { color:var(--muted); font-size:13.5px; padding:10px 8px; margin:0; }
+  .note { color:var(--muted); font-size:12.5px; margin:10px 4px 2px; line-height:1.5; }
+
+  /* ---------- Select ---------- */
+  select.select {
+    width:100%; background:var(--surface-sunken); border:1px solid var(--line-strong);
+    color:var(--ink); border-radius:var(--r-md); padding:14px 16px; font:inherit;
+    font-size:15px; font-weight:550; min-height:52px;
+    appearance:none; -webkit-appearance:none; cursor:pointer;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%237A8699' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:right 16px center; padding-right:40px;
+    transition:border-color .15s ease, background-color .15s ease;
+  }
+  select.select:hover { border-color:var(--navy); background-color:var(--surface); }
+
+  /* ---------- Date chips ---------- */
+  .presets { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
+  #presets .preset {
+    border:1px solid var(--line-strong); background:var(--surface-sunken); color:var(--ink-soft);
+    border-radius:var(--r-pill); padding:9px 16px; font-size:13.5px; font-weight:550;
+    cursor:pointer; min-height:38px;
+    transition:border-color .15s ease, color .15s ease, background .15s ease, box-shadow .15s ease;
+  }
+  #presets .preset:hover { border-color:var(--navy); color:var(--navy); background:var(--surface); }
+  #presets .preset[aria-pressed="true"] {
+    background:var(--navy); color:#fff; border-color:var(--navy);
+    box-shadow:var(--shadow-brand); font-weight:650;
+  }
+
+  .dates { display:flex; gap:12px; flex-wrap:wrap; }
+  .field { display:flex; flex-direction:column; gap:6px; flex:1; min-width:145px; }
+  .field span {
+    font-size:11px; color:var(--muted); font-weight:650;
+    text-transform:uppercase; letter-spacing:.07em;
+  }
+  input[type=date] {
+    background:var(--surface-sunken); border:1px solid var(--line-strong); color:var(--ink);
+    border-radius:var(--r-md); padding:12px 14px; font:inherit; font-size:15px;
+    min-height:48px; width:100%; font-variant-numeric:tabular-nums;
+    transition:border-color .15s ease, background .15s ease;
+  }
+  input[type=date]:hover { border-color:var(--navy); background:var(--surface); }
+
+  /* ---------- Actions ---------- */
+  .actions { display:flex; flex-direction:column; gap:10px; align-items:stretch; }
+  button.primary {
+    background:linear-gradient(180deg, var(--navy-lift) 0%, var(--navy) 100%);
+    color:#fff; border:none; border-radius:var(--r-md);
+    padding:15px 24px; font:inherit; font-size:15.5px; font-weight:650;
+    letter-spacing:-.01em; cursor:pointer; min-height:52px; width:100%;
+    box-shadow:var(--shadow-brand);
+    transition:transform .12s ease, box-shadow .15s ease, filter .15s ease;
+  }
+  button.primary:hover { filter:brightness(1.08); box-shadow:0 8px 22px -5px rgba(11,60,145,.44); }
+  button.primary:active { transform:translateY(1px); }
+  button.secondary {
+    background:var(--surface-sunken); color:var(--ink); border:1px solid var(--line-strong);
+    border-radius:var(--r-md); padding:14px 18px; font:inherit; font-size:15px; font-weight:550;
+    cursor:pointer; min-height:50px; flex:1;
+    transition:border-color .15s ease, color .15s ease, background .15s ease;
+  }
+  button.secondary:hover { border-color:var(--navy); color:var(--navy); background:var(--surface); }
+  button:disabled { opacity:.5; cursor:not-allowed; filter:none; transform:none; }
+  .secondary-row { display:flex; gap:10px; }
+
+  .status { color:var(--muted); font-size:13px; min-height:18px; }
+  .error {
+    color:var(--danger); font-size:13.5px; margin:12px 0 0; padding:11px 14px;
+    background:rgba(192,57,43,.06); border:1px solid rgba(192,57,43,.22);
+    border-radius:var(--r-sm); line-height:1.5;
+  }
+
+  @media (min-width:540px) {
+    .actions { flex-direction:row; align-items:center; flex-wrap:wrap; }
+    button.primary { width:auto; flex:1.4; }
+    .secondary-row { flex:1; }
+    .status { width:100%; }
+  }
+</style>
+</head>
+<body>
+<header class="masthead">
+  <div class="wrap">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <path d="M21 40.6 C22 30 26 22 31.2 16.8 C38 21 39.5 30 36 37.8 C31 42 25 42.5 21 40.6 Z" fill="#F0A020"/>
+        <circle cx="32" cy="32" r="22" stroke="#0B3C91" stroke-width="8.6"
+                stroke-dasharray="38 100.23" transform="rotate(-88 32 32)"/>
+        <circle cx="32" cy="32" r="22" stroke="#E31B37" stroke-width="11.8"
+                stroke-dasharray="53 85.23" transform="rotate(22 32 32)"/>
+        <circle cx="32" cy="32" r="22" stroke="#E31B37" stroke-width="4.6"
+                stroke-dasharray="24 114.23" transform="rotate(196 32 32)"/>
+      </svg>
+      <span class="wordmark">Digital<br>Hub<span class="wordmark-360">360</span></span>
+    </div>
+    <p class="sub">Client Reports — pick accounts, pick dates, preview or download.</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="card">
+    <div class="card-head">
+      <h2>Ad accounts</h2>
+      <button type="button" class="refresh" id="refresh" title="Re-fetch live data from Meta and Google">
+        <span class="refresh-icon" aria-hidden="true">&#8635;</span>
+        <span id="refreshed">updating…</span>
+      </button>
+    </div>
+    <div class="presets" id="platform-tabs">
+      <button class="preset" data-platform="meta" aria-pressed="true">Meta Ads</button>
+      <button class="preset" data-platform="google">Google Ads</button>
+    </div>
+    <div class="dropdown" id="accounts-dropdown">
+      <button type="button" class="dropdown-toggle" id="accounts-toggle" aria-expanded="false">
+        <span class="dropdown-summary placeholder" id="accounts-summary">Select ad accounts</span>
+        <span class="chevron">▼</span>
+      </button>
+      <div class="dropdown-panel" id="accounts-panel" hidden>
+        <div id="accounts"><p class="empty">Loading accounts…</p></div>
+        <div id="account-errors"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Break down by</h2>
+    <select class="select" id="level">
+      <option value="campaign" selected>Campaign</option>
+      <option value="adset">Ad set</option>
+      <option value="ad">Each ad</option>
+    </select>
+  </section>
+
+  <section class="card">
+    <h2>Date range</h2>
+    <div class="presets" id="presets">
+      <button class="preset" data-days="1">Today</button>
+      <button class="preset" data-days="3">Last 3 days</button>
+      <button class="preset" data-days="7">Last 7 days</button>
+      <button class="preset" data-days="14">Last 14 days</button>
+      <button class="preset" data-days="30" aria-pressed="true">Last 30 days</button>
+      <button class="preset" data-days="90">Last 90 days</button>
+      <button class="preset" data-month="last">Last month</button>
+    </div>
+    <div class="dates">
+      <label class="field"><span>From</span><input type="date" id="since"></label>
+      <label class="field"><span>To</span><input type="date" id="until"></label>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="actions">
+      <button class="primary" id="preview">Preview report</button>
+      <div class="secondary-row">
+        <button class="secondary" id="download">Download</button>
+        <button class="secondary" id="csv">CSV</button>
+      </div>
+      <span class="status" id="status"></span>
+    </div>
+    <p class="error" id="error" hidden></p>
+  </section>
+</main>
+
+<script>
+  const state = {
+    accounts: [],
+    data: null,
+    platform: 'meta',
+    selected: new Set(),
+    level: 'campaign',
+    campaigns: new Map(), // account key -> campaigns fetched from the API
+    picked: new Map(),    // account key -> Set of chosen campaign ids
+  };
+  const $ = (id) => document.getElementById(id);
+  // Local calendar date, not UTC. Meta and Google report in the ad account's own
+  // timezone (Asia/Kolkata here); toISOString() would roll "today" back to yesterday
+  // for every hour between midnight and 05:30 IST.
+  const iso = (d) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  function setRange(since, until) {
+    $('since').value = since;
+    $('until').value = until;
+  }
+
+  function applyDays(days) {
+    const until = new Date();
+    const since = new Date(until.getTime() - (days - 1) * 86400000);
+    setRange(iso(since), iso(until));
+  }
+
+  function applyLastMonth() {
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const last = new Date(now.getFullYear(), now.getMonth(), 0);
+    setRange(iso(first), iso(last));
+  }
+
+  $('level').addEventListener('change', () => { state.level = $('level').value; });
+
+  $('platform-tabs').addEventListener('click', (e) => {
+    const btn = e.target.closest('.preset');
+    if (!btn) return;
+    for (const b of $('platform-tabs').querySelectorAll('.preset')) b.setAttribute('aria-pressed', 'false');
+    btn.setAttribute('aria-pressed', 'true');
+    state.platform = btn.dataset.platform;
+    renderAccountsPanel();
+  });
+
+  $('presets').addEventListener('click', (e) => {
+    const btn = e.target.closest('.preset');
+    if (!btn) return;
+    for (const b of $('presets').querySelectorAll('.preset')) b.setAttribute('aria-pressed', 'false');
+    btn.setAttribute('aria-pressed', 'true');
+    if (btn.dataset.month === 'last') applyLastMonth();
+    else applyDays(Number(btn.dataset.days));
+  });
+
+  for (const input of [$('since'), $('until')]) {
+    input.addEventListener('change', () => {
+      for (const b of document.querySelectorAll('.preset')) b.setAttribute('aria-pressed', 'false');
+    });
+  }
+
+  // ---- ad accounts dropdown --------------------------------------------------
+  const accountsDropdown = $('accounts-dropdown');
+  const accountsToggle = $('accounts-toggle');
+  const accountsPanel = $('accounts-panel');
+
+  function openAccountsPanel() {
+    accountsPanel.hidden = false;
+    accountsToggle.setAttribute('aria-expanded', 'true');
+  }
+  function closeAccountsPanel() {
+    accountsPanel.hidden = true;
+    accountsToggle.setAttribute('aria-expanded', 'false');
+  }
+  accountsToggle.addEventListener('click', () => {
+    if (accountsPanel.hidden) openAccountsPanel(); else closeAccountsPanel();
+  });
+  document.addEventListener('click', (e) => {
+    if (!accountsDropdown.contains(e.target)) closeAccountsPanel();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeAccountsPanel();
+  });
+
+  function key(a) { return a.platform + ':' + a.id; }
+
+  const money = (n) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
+
+  // An account that runs dry stops delivering silently, so the balance sits right
+  // next to the account name — the amount always, colour only when it needs action.
+  // Meta: a real balance, always. Google: a real balance IF you've anchored one
+  // (tap the pencil to set or update it), otherwise an automatic live pace check —
+  // Google's API has no balance field at all, but it does have accurate daily spend,
+  // and a funds problem always shows up there as delivery collapsing to near-zero.
+  // Nothing is required from you either way; the pencil is there only if you want
+  // the precise ₹ figure instead of the automatic signal.
+  function balanceBadge(a) {
+    const google = a.platform === 'google';
+    const b = a.balance;
+    const pencil = google
+      ? `<button class="fund-pencil" data-setbal="${a.id}" title="Set the exact balance from your Google Ads billing page">✎</button>`
+      : '';
+
+    if (b) {
+      const tone = b.empty ? 'empty' : b.low ? 'low' : 'ok';
+      const label = b.empty ? 'out of funds' : money(b.available);
+      const tip = b.source === 'anchored'
+        ? `You set ${money(b.available + b.spentSince)} on ${b.anchoredAt}; ${money(b.spentSince)} spent since.`
+        : '';
+      return `<span class="fund-badge ${tone}" ${tip ? `title="${tip}"` : ''}>${label}</span>${pencil}`;
+    }
+
+    if (google && a.pace?.status === 'dropped') {
+      return `<span class="fund-badge empty" title="Yesterday averaged ₹${Math.round(a.pace.recentAvg)}/day vs a usual ₹${Math.round(a.pace.baselineAvg)}/day — check funds.">spend dropped ${a.pace.droppedPct}%</span>${pencil}`;
+    }
+    return google ? pencil : '';
+  }
+
+  async function setBalance(id) {
+    const entered = prompt(
+      'Google Ads → Billing → "Available funds".\n\nEnter that amount (leave blank to remove):',
+    );
+    if (entered === null) return;
+    const amount = entered.trim() === '' ? null : Number(entered.replace(/[^\d.]/g, ''));
+    if (amount !== null && !Number.isFinite(amount)) return showError('That is not a number.');
+    try {
+      const res = await fetch('/api/balance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform: 'google', id, amount }),
+      });
+      const body = await res.json();
+      if (body.error) throw new Error(body.error);
+      showError('');
+      await loadAccounts();
+    } catch (e) {
+      showError(e.message);
+    }
+  }
+
+  function accountRowMarkup(a) {
+    return `
+      <div class="account-row" data-row="${a.platform}:${a.id}">
+        <label class="account">
+          <input type="checkbox" data-key="${a.platform}:${a.id}">
+          <span class="account-name">${a.name}</span>
+          <span class="picked" data-picked="${a.platform}:${a.id}"></span>
+          ${balanceBadge(a)}
+          ${a.currency ? `<span class="account-meta">${a.currency}</span>` : ''}
+          ${a.active ? '' : '<span class="badge">inactive</span>'}
+          <button class="disclosure" data-expand="${a.platform}:${a.id}"
+            title="Choose individual campaigns">Campaigns ▾</button>
+        </label>
+      </div>`;
+  }
+
+  // Only the currently chosen platform's accounts are shown — selections on the
+  // other platform stay intact in state.selected, they're just off-screen.
+  function renderAccountsPanel() {
+    const data = state.data;
+    if (!data) return;
+    const label = state.platform === 'meta' ? 'Meta Ads' : 'Google Ads';
+    const list = state.platform === 'meta' ? data.meta : data.google;
+    const host = $('accounts');
+
+    if (!list.length) {
+      host.innerHTML = `<p class="empty">No ${label} accounts found. Check the errors below.</p>`;
+    } else {
+      host.innerHTML = `
+        <div class="platform">
+          <div class="platform-head">
+            <span class="platform-name">${label}</span>
+            <button class="link" data-all="${label}">Select all</button>
+          </div>
+          ${list.map(accountRowMarkup).join('')}
+        </div>`;
+    }
+
+    // Re-check every checkbox against the persisted selection, since the DOM was rebuilt.
+    for (const a of list) {
+      const box = document.querySelector(`input[data-key="${key(a)}"]`);
+      if (box) box.checked = state.selected.has(key(a));
+      renderPickedLabel(key(a));
+    }
+
+    // "Missing in .env" just means that platform isn't connected yet — that's a note,
+    // not a failure worth colouring red.
+    const err = data.errors.find((e) => e.platform === state.platform);
+    $('account-errors').innerHTML = err
+      ? (err.message.startsWith('Missing in .env')
+          ? `<p class="note">${label} isn't connected yet — add its credentials to .env to see those accounts here.</p>`
+          : `<p class="error">${label}: ${err.message}</p>`)
+      : '';
+  }
+
+  // ---- campaign drill-down -------------------------------------------------
+  // state.picked.get(key) is the set of campaign ids chosen inside an account.
+  // Empty (or absent) means "the whole account", which is the default.
+
+  function pickedFor(key) {
+    if (!state.picked.has(key)) state.picked.set(key, new Set());
+    return state.picked.get(key);
+  }
+
+  function renderPickedLabel(key) {
+    const el = document.querySelector(`[data-picked="${key}"]`);
+    if (!el) return;
+    const n = pickedFor(key).size;
+    el.textContent = n ? `${n} campaign${n > 1 ? 's' : ''}` : '';
+  }
+
+  function campaignMarkup(key, campaigns) {
+    if (!campaigns.length) return '<p class="loading">No campaigns in this account.</p>';
+    const picked = pickedFor(key);
+    return `
+      <div class="bulk">
+        <button class="link" data-campaign-all="${key}">All</button>
+        <button class="link" data-campaign-none="${key}">None</button>
+      </div>
+      ${campaigns.map((c) => `
+        <label class="campaign">
+          <input type="checkbox" data-campaign="${key}" value="${c.id}"
+            ${picked.has(c.id) ? 'checked' : ''}>
+          <span class="campaign-name">${c.name}</span>
+          ${c.active ? '' : `<span class="paused">${c.status || 'paused'}</span>`}
+        </label>`).join('')}`;
+  }
+
+  async function toggleCampaigns(key) {
+    const row = document.querySelector(`[data-row="${key}"]`);
+    const open = row.querySelector('.campaigns');
+    if (open) {
+      open.remove();
+      row.classList.remove('open');
+      return;
+    }
+
+    row.classList.add('open');
+    const panel = document.createElement('div');
+    panel.className = 'campaigns';
+    panel.innerHTML = '<p class="loading">Loading campaigns…</p>';
+    row.appendChild(panel);
+
+    const [platform, id] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
+    try {
+      const res = await fetch(`/api/campaigns?platform=${platform}&id=${encodeURIComponent(id)}`);
+      const body = await res.json();
+      if (body.error) throw new Error(body.error);
+      state.campaigns.set(key, body.campaigns);
+      panel.innerHTML = campaignMarkup(key, body.campaigns);
+    } catch (e) {
+      panel.innerHTML = `<p class="error">${e.message}</p>`;
+    }
+  }
+
+  function setAccountChecked(key, on) {
+    const box = document.querySelector(`input[data-key="${key}"]`);
+    if (box) box.checked = on;
+    if (on) state.selected.add(key);
+    else state.selected.delete(key);
+  }
+
+  // Bound once, on the container — the account list is re-rendered inside it.
+  {
+    const host = $('accounts');
+
+    host.addEventListener('change', (e) => {
+      const campaignBox = e.target.closest('input[data-campaign]');
+      if (campaignBox) {
+        const key = campaignBox.dataset.campaign;
+        const picked = pickedFor(key);
+        if (campaignBox.checked) picked.add(campaignBox.value);
+        else picked.delete(campaignBox.value);
+        // Picking a campaign implies reporting on that account.
+        if (picked.size) setAccountChecked(key, true);
+        renderPickedLabel(key);
+        updateStatus();
+        return;
+      }
+
+      const box = e.target.closest('input[data-key]');
+      if (!box) return;
+      setAccountChecked(box.dataset.key, box.checked);
+      updateStatus();
+    });
+
+    host.addEventListener('click', (e) => {
+      const setBal = e.target.closest('[data-setbal]');
+      if (setBal) {
+        e.preventDefault();
+        setBalance(setBal.dataset.setbal);
+        return;
+      }
+
+      const expand = e.target.closest('[data-expand]');
+      if (expand) {
+        e.preventDefault();
+        toggleCampaigns(expand.dataset.expand);
+        return;
+      }
+
+      const all = e.target.closest('[data-campaign-all]');
+      const none = e.target.closest('[data-campaign-none]');
+      if (all || none) {
+        e.preventDefault();
+        const key = (all || none).dataset.campaignAll || (all || none).dataset.campaignNone;
+        const picked = pickedFor(key);
+        picked.clear();
+        const boxes = document.querySelectorAll(`input[data-campaign="${key}"]`);
+        for (const b of boxes) {
+          b.checked = Boolean(all);
+          if (all) picked.add(b.value);
+        }
+        if (all) setAccountChecked(key, true);
+        renderPickedLabel(key);
+        updateStatus();
+        return;
+      }
+
+      const btn = e.target.closest('[data-all]');
+      if (!btn) return;
+      const boxes = btn.closest('.platform').querySelectorAll('input[data-key]');
+      const turnOn = [...boxes].some((b) => !b.checked);
+      for (const b of boxes) setAccountChecked(b.dataset.key, turnOn);
+      btn.textContent = turnOn ? 'Clear all' : 'Select all';
+      updateStatus();
+    });
+  }
+
+  function updateStatus() {
+    const n = state.selected.size;
+    const summary = $('accounts-summary');
+    if (!n) {
+      summary.textContent = 'Select ad accounts';
+      summary.classList.add('placeholder');
+      $('status').textContent = '';
+      return;
+    }
+    const narrowed = [...state.selected].filter((k) => state.picked.get(k)?.size).length;
+    summary.textContent = `${n} account${n > 1 ? 's' : ''} selected` +
+      (narrowed ? ` · ${narrowed} narrowed` : '');
+    summary.classList.remove('placeholder');
+    $('status').textContent = '';
+  }
+
+  function selectedAccounts() {
+    return [...state.selected]
+      .map((k) => {
+        const account = state.accounts.find((a) => key(a) === k);
+        if (!account) return null;
+        const picked = state.picked.get(k);
+        return { ...account, campaignIds: picked ? [...picked] : [] };
+      })
+      .filter(Boolean);
+  }
+
+  function showError(message) {
+    const el = $('error');
+    el.textContent = message;
+    el.hidden = !message;
+  }
+
+  async function generate(format, mode) {
+    const accounts = selectedAccounts();
+    if (!accounts.length) return showError('Select at least one ad account first.');
+    showError('');
+
+    const buttons = [$('download'), $('preview'), $('csv')];
+    for (const b of buttons) b.disabled = true;
+    $('status').textContent = 'Pulling data…';
+
+    try {
+      const res = await fetch('/api/report' + (mode === 'preview' ? '?download=0' : ''), {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accounts, since: $('since').value, until: $('until').value,
+          format, level: state.level,
+        }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Server returned ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const stamp = `${$('since').value}_to_${$('until').value}`;
+
+      if (mode === 'preview') {
+        window.open(url, '_blank');
+      } else {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `client-report-${stamp}.${format}`;
+        a.click();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      $('status').textContent = 'Done.';
+    } catch (e) {
+      showError(e.message);
+      $('status').textContent = '';
+    } finally {
+      for (const b of buttons) b.disabled = false;
+    }
+  }
+
+  $('download').addEventListener('click', () => generate('html', 'download'));
+  $('preview').addEventListener('click', () => generate('html', 'preview'));
+  $('csv').addEventListener('click', () => generate('csv', 'download'));
+
+  // The timestamp is the point of the button: it says when these numbers were actually
+  // pulled, so "is this live?" is never a guess. `cache: no-store` plus a changing
+  // query string is belt-and-braces for iOS, which will otherwise reuse a response.
+  function loadAccounts() {
+    const btn = $('refresh');
+    btn.disabled = true;
+    btn.classList.add('spinning');
+    $('refreshed').textContent = 'updating…';
+
+    return fetch(`/api/accounts?t=${Date.now()}`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((data) => {
+        state.accounts = [...data.meta, ...data.google];
+        state.data = data;
+        renderAccountsPanel();
+        const now = new Date();
+        $('refreshed').textContent = `updated ${now.toLocaleTimeString('en-IN', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })}`;
+      })
+      .catch((e) => {
+        $('accounts').innerHTML = `<p class="error">Could not load accounts: ${e.message}</p>`;
+        $('refreshed').textContent = 'failed — tap to retry';
+      })
+      .finally(() => {
+        btn.disabled = false;
+        btn.classList.remove('spinning');
+      });
+  }
+
+  $('refresh').addEventListener('click', () => {
+    closeAccountsPanel();
+    loadAccounts();
+  });
+
+  // Coming back to the app after it was backgrounded (the usual way it is used on a
+  // phone) should show current numbers, not whatever was on screen an hour ago.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') loadAccounts();
+  });
+
+  applyDays(30);
+  loadAccounts();
+</script>
+</body>
+</html>

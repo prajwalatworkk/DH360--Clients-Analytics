@@ -1,0 +1,28 @@
+[
+  {
+    "name": "BizStartify",
+    "meta": {
+      "adAccountId": "act_000000000000000"
+    },
+    "googleAds": {
+      "customerId": "0000000000"
+    },
+    "sheet": {
+      "endpoint": "https://script.google.com/macros/s/XXXXX/exec",
+      "tab": "Landing page lead",
+      "timestampColumn": "Timestamp",
+      "statusColumn": "Status",
+      "campaignColumn": "Campaign"
+    }
+  },
+  {
+    "name": "EduVyapar",
+    "meta": null,
+    "googleAds": null,
+    "sheet": {
+      "endpoint": "https://script.google.com/macros/s/YYYYY/exec",
+      "tab": "Leads",
+      "timestampColumn": "Timestamp"
+    }
+  }
+]
