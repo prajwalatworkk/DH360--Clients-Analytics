@@ -206,6 +206,10 @@ export function totalsOf(campaigns) {
     },
   );
   t.hasCrm = campaigns.some((c) => c.hasCrm);
+  // Whether quality is *known* for this channel, as opposed to being zero. A real
+  // zero ("nothing closed yet") must not read as "no data", or a fallback source
+  // gets substituted for it and reports a number that belongs to something else.
+  t.hasQualityData = campaigns.some((c) => c.qualified != null || c.closed != null);
   // Merge every campaign's status breakdown into one account-level view.
   t.statuses = {};
   for (const c of campaigns) {

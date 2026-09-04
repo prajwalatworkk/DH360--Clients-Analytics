@@ -579,7 +579,9 @@ function channelBlock(title, data, opts = {}) {
   // Quality columns are always shown — an empty column tells you the pipeline isn't
   // connected, which is information. Hiding them just looks like the feature is missing.
   const showQuality = true;
-  const hasQuality = opts.hasQuality || t.hasCrm;
+  // This channel's own quality data decides what this channel shows — a sibling
+  // platform having statuses says nothing about this one.
+  const hasQuality = t.hasQualityData || t.hasCrm || opts.hasQuality;
 
   // A pixel firing far more often than real form submissions is a broken pixel,
   // not a good month — say so rather than printing it as a result.
@@ -805,20 +807,63 @@ function balanceBlock(balances) {
   </section>`;
 }
 
+// Says plainly what this block is a total OF. When a client runs on both platforms
+// the headline figures are Meta + Google added together, which is invisible from the
+// numbers alone — the per-platform sections further down only ever show their own
+// share, so the two never appear to reconcile without this.
+function sourcesLine(sources) {
+  if (!sources?.length) return '';
+  const parts = sources.map((s) => {
+    const scope = s.campaignCount
+      ? `${s.campaignCount} campaign${s.campaignCount > 1 ? 's' : ''}`
+      : 'all campaigns';
+    return `<span class="src"><i class="src-dot ${s.platform === 'Meta Ads' ? 'meta' : 'google'}"></i>
+      ${esc(s.platform)} · ${esc(s.account)} <span class="src-scope">${scope}</span></span>`;
+  });
+  const note = sources.length > 1
+    ? '<p class="src-note">Figures below this line are these sources added together.</p>'
+    : '';
+  return `<div class="sources">${parts.join('')}${note}</div>`;
+}
+
 function clientBlock(client, { internal = false } = {}) {
   const meta = client.meta && !client.meta.error ? client.meta.totals : null;
   const google = client.googleAds && !client.googleAds.error ? client.googleAds.totals : null;
   const spend = (meta?.spend || 0) + (google?.spend || 0);
   const leadCount = (meta?.leads || 0) + (google?.leads || 0);
-  const qualified = (meta?.qualified || 0) + (google?.qualified || 0) || client.leads?.tally?.qualified || 0;
-  const closed = (meta?.closed || 0) + (google?.closed || 0) || client.leads?.tally?.closed || 0;
-  // Quality data can arrive two ways: synced from the CRM into Meta, or from the
-  // client's lead sheet. Either one counts.
-  const hasQuality = Boolean(client.leads?.hasStatusColumn || meta?.hasCrm || google?.hasCrm);
+
+  // Quality (qualified / closed) can come from the ad platforms — CRM statuses
+  // synced back, or sheet rows matched to a campaign — or, for a client with no ad
+  // account selected at all, from the lead sheet's own totals.
+  //
+  // These two must never be mixed. The sheet's totals cover the whole sheet: they
+  // are not filtered to the selected account, nor to the campaigns the report is
+  // narrowed to, and the sheet may even track a different platform than the one on
+  // screen. Using them to "fill in" a platform's genuine zero is how a Meta-only
+  // report came to display 31 closures taken from a sheet tab named "Google ads".
+  //
+  // So: if any ad channel is present, the platforms are the only source. The sheet
+  // total is used solely when there is no ad channel to speak for.
+  const hasAdChannel = Boolean(meta || google);
+  const platformKnowsQuality = Boolean(meta?.hasQualityData || google?.hasQualityData);
+
+  const qualified = hasAdChannel
+    ? (meta?.qualified || 0) + (google?.qualified || 0)
+    : client.leads?.tally?.qualified || 0;
+  const closed = hasAdChannel
+    ? (meta?.closed || 0) + (google?.closed || 0)
+    : client.leads?.tally?.closed || 0;
+
+  // "—" rather than "0" when nothing can speak to quality, so an unknown never
+  // masquerades as a measured zero.
+  const hasQuality = hasAdChannel
+    ? platformKnowsQuality
+    : Boolean(client.leads?.hasStatusColumn);
 
   return `<article class="client">
     <header class="client-head">
       <h2>${esc(client.name)}</h2>
+      ${sourcesLine(client.sources)}
       ${goalBanner(client.goals)}
       <div class="headline">
         ${stat('Ad spend', inr(spend))}
@@ -1026,6 +1071,16 @@ export function renderReport({ clients, since, until, generatedAt, internal = fa
   .nav button:hover, .nav-home:hover { border-color:var(--navy); color:var(--navy); }
   .nav-home { font-weight:600; }
   .nav-spacer { flex:1; }
+
+  /* What this block totals up */
+  .sources { display:flex; flex-wrap:wrap; gap:8px 16px; margin:0 0 14px; align-items:center; }
+  .src { display:inline-flex; align-items:center; gap:7px; font-size:12.5px; color:var(--muted); }
+  .src-dot { width:8px; height:8px; border-radius:50%; display:inline-block; flex:none; }
+  .src-dot.meta { background:var(--chart-meta); }
+  .src-dot.google { background:var(--chart-google); }
+  .src-scope { color:var(--muted); opacity:.75; }
+  .src-note { width:100%; margin:2px 0 0; font-size:12px; color:var(--muted);
+    border-left:3px solid var(--orange); padding-left:9px; }
 
   /* Internal-only sections (never in the client copy) */
   .internal-tag { font-size:10px; font-weight:700; text-transform:uppercase;

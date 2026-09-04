@@ -17,7 +17,7 @@ import { writeAnchor, clearAnchor, todayLocal } from './src/manualBalance.js';
 import { listMetaCampaigns, listGoogleCampaigns } from './src/campaigns.js';
 import { fetchMeta, fetchMetaDaily } from './src/meta.js';
 import { fetchGoogleAds, fetchGoogleAdsDaily } from './src/googleAds.js';
-import { fetchLeads, applyLeadQuality } from './src/sheets.js';
+import { fetchLeads, applyLeadQuality, scopeLeads } from './src/sheets.js';
 import { fetchMetaGoals } from './src/goals.js';
 import { analyse } from './src/insights.js';
 import { totalsOf } from './src/meta.js';
@@ -117,11 +117,22 @@ async function buildReport({ accounts, since, until, level, internal = false }) 
     const linked = sheetConfigFor(account.id);
     const label = linked?.name || account.name;
     if (!groups.has(label)) {
-      groups.set(label, { name: label, meta: null, googleAds: null, sheet: linked?.sheet || null });
+      groups.set(label, {
+        name: label, meta: null, googleAds: null, sheet: linked?.sheet || null,
+        // What was actually picked, so the report can say so outright. Two accounts
+        // from different platforms merge into one client block, and without this the
+        // headline totals look inexplicable — they are a sum across both.
+        sources: [],
+      });
     }
     const group = groups.get(label);
     // campaignIds empty/absent means "the whole account".
     const campaignIds = account.campaignIds || [];
+    group.sources.push({
+      platform: account.platform === 'meta' ? 'Meta Ads' : 'Google Ads',
+      account: account.name,
+      campaignCount: campaignIds.length,
+    });
     if (account.platform === 'meta') group.meta = { adAccountId: account.id, campaignIds };
     else group.googleAds = { customerId: account.id, campaignIds };
   }
@@ -142,15 +153,38 @@ async function buildReport({ accounts, since, until, level, internal = false }) 
       fetchGoogleAdsDaily(group, range).catch(() => []),
     ]);
 
+    // When the user narrowed to specific campaigns, the Sheet has to be narrowed the
+    // same way. It is keyed by campaign, but it is fetched for the whole tab — left
+    // unscoped, a one-campaign report prints account-wide Sheet totals beside
+    // one-campaign ad numbers, and nothing on the page explains the mismatch.
+    const selectedIds = [
+      ...(group.meta?.campaignIds || []),
+      ...(group.googleAds?.campaignIds || []),
+    ];
+    let scopedLeads = leads;
+    if (selectedIds.length) {
+      const adRows = selectedIds.map((id) => ({ id, campaignName: null }));
+      for (const channel of [meta, googleAds]) {
+        if (!channel || channel.error) continue;
+        for (const row of channel.campaigns) {
+          adRows.push({ id: null, campaignName: row.campaignName || row.name });
+        }
+      }
+      scopedLeads = scopeLeads(leads, adRows);
+    }
+
     // Lead quality lives in the Sheet, so it is folded in after the ad data arrives
     // and the totals are recomputed to include it.
     for (const channel of [meta, googleAds]) {
       if (!channel || channel.error) continue;
-      applyLeadQuality(channel, leads);
+      applyLeadQuality(channel, scopedLeads);
       channel.totals = totalsOf(channel.campaigns);
     }
 
-    const client = { name: group.name, meta, googleAds, leads, goals, metaDaily, googleDaily };
+    const client = {
+      name: group.name, meta, googleAds, leads: scopedLeads, goals, metaDaily, googleDaily,
+      sources: group.sources,
+    };
     client.insights = analyse(client);
 
     // Runway is measured per platform against that platform's own spend over the

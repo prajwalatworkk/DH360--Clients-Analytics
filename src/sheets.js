@@ -44,6 +44,11 @@ export async function fetchLeads(client, { since, until }) {
   const statusKey = client.sheet.statusColumn || 'Status';
   const campaignKey = client.sheet.campaignColumn || 'Campaign';
 
+  // Every row, pre-classified. scopeLeads() rebuilds the counts from these when
+  // the user picked a subset of campaigns, so the Sheet totals describe the same
+  // campaigns as the ad data beside them rather than the whole tab.
+  const classified = [];
+
   const perDay = {};
   const bySource = {};
   const byCampaign = {};
@@ -75,6 +80,8 @@ export async function fetchLeads(client, { since, until }) {
     byCampaign[key].total += 1;
     if (bucket !== 'new') byCampaign[key][bucket] += 1;
 
+    classified.push({ day, source, bucket, campaign, key, row });
+
     // Same row, indexed again by raw ID if the value looks numeric — a
     // campaign named e.g. "2026" would otherwise collide with an ID.
     if (campaign && /^\d+$/.test(campaign)) {
@@ -91,6 +98,7 @@ export async function fetchLeads(client, { since, until }) {
   );
 
   return {
+    classified,
     count: rows.length,
     perDay,
     bySource,
@@ -104,25 +112,88 @@ export async function fetchLeads(client, { since, until }) {
   };
 }
 
+// Does this Sheet row's Campaign value refer to this ad row? Exact ID match first —
+// unambiguous, and required for landing pages that log the {campaignid} ValueTrack
+// number instead of a typed name. Then exact name, then a contains-match so
+// "Lead Gen \u2013 July" still finds "Lead Gen".
+//
+// The contains-match needs a floor: without one a two-letter Sheet entry matches
+// every campaign in the account, which is how one client's Sheet totals end up
+// printed against another platform's campaigns.
+const MIN_FUZZY = 4;
+
+export function campaignKeyOf(adRow) {
+  const name = adRow.campaignName || adRow.name;
+  return name ? String(name).trim().toLowerCase() : null;
+}
+
+export function sheetMatches(adRow, sheetKey, sheetCampaign) {
+  if (adRow.id != null && sheetCampaign && String(sheetCampaign) === String(adRow.id)) return true;
+  const key = campaignKeyOf(adRow);
+  if (!key || !sheetKey) return false;
+  if (sheetKey === key) return true;
+  if (sheetKey.length < MIN_FUZZY || key.length < MIN_FUZZY) return false;
+  return sheetKey.includes(key) || key.includes(sheetKey);
+}
+
+// Restrict a Sheet's counts to the campaigns the user actually selected. Called
+// whenever the selection is a subset of an account: without it the report shows
+// campaign-level ad numbers next to account-wide Sheet numbers, and the two
+// disagree for reasons nothing on the page explains.
+export function scopeLeads(leads, adRows) {
+  if (!leads || leads.error || !leads.classified) return leads;
+
+  const kept = leads.classified.filter((c) => adRows.some((r) => sheetMatches(r, c.key, c.campaign)));
+
+  const perDay = {};
+  const bySource = {};
+  const byCampaign = {};
+  const byCampaignId = {};
+  const tally = { total: 0, qualified: 0, closed: 0, junk: 0 };
+
+  for (const c of kept) {
+    if (c.day) perDay[c.day] = (perDay[c.day] || 0) + 1;
+    bySource[c.source] = (bySource[c.source] || 0) + 1;
+    tally.total += 1;
+    if (c.bucket !== 'new') tally[c.bucket] += 1;
+
+    for (const [index, k] of [[byCampaign, c.key], [byCampaignId, c.campaign]]) {
+      if (index === byCampaignId && !/^\d+$/.test(c.campaign || '')) continue;
+      if (!index[k]) index[k] = { campaign: c.campaign, total: 0, qualified: 0, closed: 0, junk: 0 };
+      index[k].total += 1;
+      if (c.bucket !== 'new') index[k][c.bucket] += 1;
+    }
+  }
+
+  return {
+    ...leads,
+    classified: kept,
+    count: kept.length,
+    perDay,
+    bySource,
+    byCampaign,
+    byCampaignId,
+    tally,
+    scoped: true,
+    rows: kept.slice(-50).reverse().map((c) => c.row),
+  };
+}
+
 // Attach Sheet-derived qualified/closed counts to the ad rows they came from.
 export function applyLeadQuality(channel, leads) {
   if (!channel || channel.error || !leads || leads.error || !leads.byCampaign) return channel;
 
-  const idIndex = leads.byCampaignId || {};
   const nameIndex = leads.byCampaign;
   const lookup = (row) => {
-    // Exact ID match first — unambiguous, and required for landing pages
-    // that log the {campaignid} ValueTrack number instead of a typed name.
-    if (row.id != null && idIndex[String(row.id)]) return idIndex[String(row.id)];
-
-    const name = row.campaignName || row.name;
-    if (!name) return null;
-    const key = String(name).trim().toLowerCase();
-    if (nameIndex[key]) return nameIndex[key];
-    // Fall back to a contains-match so "Lead Gen – July" still finds "Lead Gen".
-    const hit = Object.keys(nameIndex).find((k) => k && (k.includes(key) || key.includes(k)));
-    return hit ? nameIndex[hit] : null;
+    const hit = Object.keys(nameIndex).find((k) => sheetMatches(row, k, nameIndex[k].campaign));
+    return hit != null ? nameIndex[hit] : null;
   };
+
+  // The Sheet only knows which CAMPAIGN a lead came from. At adset or ad level a
+  // campaign's counts therefore match several rows at once, and attaching them to
+  // each one would multiply the totals by the number of rows. Give them to the
+  // first (highest-spend) row of each campaign and leave the siblings blank.
+  const claimed = new Set();
 
   for (const row of channel.campaigns) {
     // Statuses synced back to Meta from the client's CRM are already on the row and
@@ -130,6 +201,8 @@ export function applyLeadQuality(channel, leads) {
     if (row.hasCrm) continue;
     const match = lookup(row);
     if (!match) continue;
+    if (claimed.has(match)) continue;
+    claimed.add(match);
     row.qualified = match.qualified;
     row.closed = match.closed;
     row.sheetLeads = match.total;

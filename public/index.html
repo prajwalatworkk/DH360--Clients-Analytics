@@ -144,6 +144,27 @@
   .dropdown-summary { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:550; }
   .dropdown-summary.placeholder { color:var(--muted); font-weight:400; }
 
+  /* What is actually going into the report — shown for both platforms at once,
+     so a selection on the hidden tab can never go unnoticed. */
+  .selected-list { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .selected-list:empty { display:none; }
+  .chip-sel {
+    display:inline-flex; align-items:center; gap:7px; background:var(--surface-sunken);
+    border:1px solid var(--line-strong); border-radius:var(--r-pill);
+    padding:6px 6px 6px 11px; font-size:12px; max-width:100%;
+  }
+  .chip-dot { width:8px; height:8px; border-radius:50%; flex:none; }
+  .chip-sel.meta .chip-dot { background:var(--chart-meta, #1450be); }
+  .chip-sel.google .chip-dot { background:var(--chart-google, #F2941F); }
+  .chip-name { font-weight:600; color:var(--ink); overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap; max-width:190px; }
+  .chip-scope { color:var(--muted); font-size:11px; white-space:nowrap; }
+  .chip-x {
+    background:none; border:none; color:var(--muted); cursor:pointer; font-size:16px;
+    line-height:1; padding:2px 6px; border-radius:50%; flex:none;
+  }
+  .chip-x:hover { color:var(--red); background:rgba(227,27,55,.1); }
+
   .dropdown-panel {
     position:absolute; left:0; right:0; top:100%; z-index:30;
     background:var(--surface); border:1px solid var(--navy); border-top:none;
@@ -347,6 +368,8 @@
         <div id="account-errors"></div>
       </div>
     </div>
+    <!-- Everything going into the report, both platforms, always visible. -->
+    <div id="selected-list" class="selected-list"></div>
   </section>
 
   <section class="card">
@@ -717,21 +740,70 @@
     });
   }
 
+  // The platform tabs only ever show one platform's accounts, so a selection made
+  // on the other tab is off-screen. That is how a Google account can end up in a
+  // report you believed was Meta-only — the totals then look "wrong" when they are
+  // really just a sum across both. So the summary names the platforms, and every
+  // selection is listed below the dropdown regardless of which tab is showing.
   function updateStatus() {
-    const n = state.selected.size;
     const summary = $('accounts-summary');
-    if (!n) {
+    const chosen = selectedAccounts();
+
+    if (!chosen.length) {
       summary.textContent = 'Select ad accounts';
       summary.classList.add('placeholder');
+      $('selected-list').innerHTML = '';
       $('status').textContent = '';
       return;
     }
-    const narrowed = [...state.selected].filter((k) => state.picked.get(k)?.size).length;
-    summary.textContent = `${n} account${n > 1 ? 's' : ''} selected` +
-      (narrowed ? ` · ${narrowed} narrowed` : '');
+
+    const metaCount = chosen.filter((a) => a.platform === 'meta').length;
+    const googleCount = chosen.filter((a) => a.platform === 'google').length;
+    const parts = [];
+    if (metaCount) parts.push(`${metaCount} Meta`);
+    if (googleCount) parts.push(`${googleCount} Google`);
+    summary.textContent = parts.join(' + ') + (chosen.length === 1 ? ' account' : ' accounts');
     summary.classList.remove('placeholder');
+
+    // One chip per selected account, showing which platform it belongs to and how
+    // many campaigns it is narrowed to. Tapping the × removes it.
+    $('selected-list').innerHTML = chosen
+      .map((a) => {
+        const n = a.campaignIds.length;
+        const scope = n ? `${n} campaign${n > 1 ? 's' : ''}` : 'whole account';
+        return `<span class="chip-sel ${a.platform}">
+          <i class="chip-dot"></i>
+          <span class="chip-name">${esc(a.name)}</span>
+          <span class="chip-scope">${scope}</span>
+          <button type="button" class="chip-x" data-unselect="${a.platform}:${a.id}"
+            title="Remove ${esc(a.name)} from this report">×</button>
+        </span>`;
+      })
+      .join('');
+
     $('status').textContent = '';
   }
+
+  // Account names come from the ad platforms, so they are escaped before going
+  // into markup rather than trusted.
+  function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  // The chips sit outside the dropdown panel, so they get their own handler.
+  $('selected-list').addEventListener('click', (e) => {
+    const x = e.target.closest('[data-unselect]');
+    if (!x) return;
+    const k = x.dataset.unselect;
+    state.selected.delete(k);
+    state.picked.delete(k);
+    // Re-tick the checkbox if that account happens to be on the visible tab.
+    const box = document.querySelector(`input[data-key="${k}"]`);
+    if (box) box.checked = false;
+    renderPickedLabel(k);
+    updateStatus();
+  });
 
   function selectedAccounts() {
     return [...state.selected]
