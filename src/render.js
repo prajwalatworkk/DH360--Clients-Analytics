@@ -40,10 +40,38 @@ function logoMarkup() {
   return `<span class="wordmark">Digital<span class="wordmark-alt">Hub</span><span class="wordmark-red">360</span></span>`;
 }
 
-function stat(label, value, sub, tone = '') {
+function stat(label, value, sub, tone = '', delta = '') {
   return `<div class="stat ${tone}"><span class="stat-label">${esc(label)}</span>
-    <span class="stat-value">${esc(value)}</span>
+    <span class="stat-value">${esc(value)}${delta}</span>
     ${sub ? `<span class="stat-sub">${esc(sub)}</span>` : ''}</div>`;
+}
+
+// Change against the comparison window, as a small ▲/▼ pill next to the value.
+// `lowerIsBetter` flips the colour for cost metrics, where a drop is the good news.
+// Nothing is drawn when there is no prior window, or both sides are zero — a pill
+// saying "0%" is noise, and "▲ from nothing" is better said as "new".
+function deltaPill(cur, prev, { lowerIsBetter = false, title = '' } = {}) {
+  if (prev == null || cur == null) return '';
+  cur = Number(cur) || 0; prev = Number(prev) || 0;
+  if (!cur && !prev) return '';
+  let text, up;
+  if (!prev) { text = 'new'; up = true; }
+  else {
+    const pct = ((cur - prev) / prev) * 100;
+    if (Math.abs(pct) < 0.5) { text = '0%'; up = null; }
+    else { up = pct > 0; text = `${up ? '▲' : '▼'} ${Math.abs(pct) >= 100 ? Math.round(Math.abs(pct)) : Math.abs(pct).toFixed(Math.abs(pct) < 10 ? 1 : 0)}%`; }
+  }
+  const good = up == null ? null : (lowerIsBetter ? !up : up);
+  const tone = good == null ? 'flat' : good ? 'good' : 'bad';
+  return `<span class="delta ${tone}" title="${esc(title)}">${esc(text)}</span>`;
+}
+
+const fmtDay = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+
+function compareLine(previous) {
+  if (!previous) return '';
+  const label = previous.days === 1 ? 'the day before' : `the previous ${previous.days} days`;
+  return `<p class="compare-line">▲▼ compared with ${esc(label)} · ${esc(fmtDay(previous.since))} – ${esc(fmtDay(previous.until))}</p>`;
 }
 
 function goalBanner(goals) {
@@ -587,6 +615,10 @@ function channelBlock(title, data, opts = {}) {
   // not a good month — say so rather than printing it as a result.
   const pixelSuspect = t.pixelLeads > Math.max(t.clicks, 1) * 1.5;
 
+  const p = opts.prior || null;
+  const d = (cur, prev, lowerIsBetter = false) =>
+    p ? deltaPill(cur, prev, { lowerIsBetter, title: opts.vs || '' }) : '';
+
   const rows = data.campaigns.length
     ? data.campaigns
         .map(
@@ -611,15 +643,15 @@ function channelBlock(title, data, opts = {}) {
   return `<section class="channel">
     <h3>${esc(title)}</h3>
     <div class="stats">
-      ${stat('Spend', inr(t.spend))}
-      ${stat('Impressions', num(t.impressions))}
-      ${stat('Clicks', num(t.clicks), `${dec(t.ctr)}% CTR`)}
-      ${stat('Leads', num(t.leads), title === 'Meta Ads' ? 'Meta lead forms' : 'Google Ads conversions', 'accent')}
-      ${stat('Cost per lead', t.leads ? inr(t.cpl) : '—')}
-      ${stat('Qualified', hasQuality ? num(t.qualified) : '—', hasQuality ? `${dec(t.qualifyRate, 0)}% of leads` : 'not tracked', 'accent')}
-      ${stat('Cost per qualified lead', hasQuality && t.qualified ? inr(t.cpql) : '—')}
-      ${stat('Closed', hasQuality ? num(t.closed) : '—', hasQuality ? `${dec(t.closeRate, 0)}% of qualified` : 'not tracked', 'win')}
-      ${stat('Cost per closure', hasQuality && t.closed ? inr(t.cpClosure) : '—')}
+      ${stat('Spend', inr(t.spend), '', '', d(t.spend, p?.spend, true))}
+      ${stat('Impressions', num(t.impressions), '', '', d(t.impressions, p?.impressions))}
+      ${stat('Clicks', num(t.clicks), `${dec(t.ctr)}% CTR`, '', d(t.clicks, p?.clicks))}
+      ${stat('Leads', num(t.leads), title === 'Meta Ads' ? 'Meta lead forms' : 'Google Ads conversions', 'accent', d(t.leads, p?.leads))}
+      ${stat('Cost per lead', t.leads ? inr(t.cpl) : '—', '', '', t.leads ? d(t.cpl, p?.cpl, true) : '')}
+      ${stat('Qualified', hasQuality ? num(t.qualified) : '—', hasQuality ? `${dec(t.qualifyRate, 0)}% of leads` : 'not tracked', 'accent', hasQuality ? d(t.qualified, p?.qualified) : '')}
+      ${stat('Cost per qualified lead', hasQuality && t.qualified ? inr(t.cpql) : '—', '', '', hasQuality && t.qualified ? d(t.cpql, p?.cpql, true) : '')}
+      ${stat('Closed', hasQuality ? num(t.closed) : '—', hasQuality ? `${dec(t.closeRate, 0)}% of qualified` : 'not tracked', 'win', hasQuality ? d(t.closed, p?.closed) : '')}
+      ${stat('Cost per closure', hasQuality && t.closed ? inr(t.cpClosure) : '—', '', '', hasQuality && t.closed ? d(t.cpClosure, p?.cpClosure, true) : '')}
     </div>
 
     ${t.hasCrm ? statusStrip(t) : ''}
@@ -860,26 +892,41 @@ function clientBlock(client, { internal = false } = {}) {
     ? platformKnowsQuality
     : Boolean(client.leads?.hasStatusColumn);
 
+  // Prior-window headline, built the same way so like compares with like.
+  const pv = client.previous?.client;
+  const pm = pv?.meta && !pv.meta.error ? pv.meta.totals : null;
+  const pg = pv?.googleAds && !pv.googleAds.error ? pv.googleAds.totals : null;
+  const prior = pv ? {
+    spend: (pm?.spend || 0) + (pg?.spend || 0),
+    leads: (pm?.leads || 0) + (pg?.leads || 0),
+    qualified: (pm?.qualified || 0) + (pg?.qualified || 0),
+    closed: (pm?.closed || 0) + (pg?.closed || 0),
+  } : null;
+  const vs = client.previous ? `vs ${fmtDay(client.previous.since)} – ${fmtDay(client.previous.until)}` : '';
+  const d = (cur, prev, lowerIsBetter = false) => prior ? deltaPill(cur, prev, { lowerIsBetter, title: vs }) : '';
+  const cp = (spend, n) => (n ? spend / n : 0);
+
   return `<article class="client">
     <header class="client-head">
       <h2>${esc(client.name)}</h2>
       ${sourcesLine(client.sources)}
       ${goalBanner(client.goals)}
+      ${compareLine(client.previous)}
       <div class="headline">
-        ${stat('Ad spend', inr(spend))}
-        ${stat('Leads', num(leadCount), leadCount ? `${inr(spend / leadCount)} per lead` : '', 'accent')}
+        ${stat('Ad spend', inr(spend), '', '', d(spend, prior?.spend, true))}
+        ${stat('Leads', num(leadCount), leadCount ? `${inr(spend / leadCount)} per lead` : '', 'accent', d(leadCount, prior?.leads))}
         ${stat('Qualified', hasQuality ? num(qualified) : '—',
           hasQuality
             ? (qualified ? `${inr(spend / qualified)} per qualified lead` : 'none yet in this period')
-            : 'not tracked', 'accent')}
+            : 'not tracked', 'accent', hasQuality ? d(qualified, prior?.qualified) : '')}
         ${stat('Closed', hasQuality ? num(closed) : '—',
           hasQuality
             ? (closed ? `${inr(spend / closed)} per closure` : 'none yet in this period')
-            : 'not tracked', 'win')}
+            : 'not tracked', 'win', hasQuality ? d(closed, prior?.closed) : '')}
       </div>
     </header>
-    ${channelBlock('Meta Ads', client.meta, { hasQuality, daily: client.metaDaily })}
-    ${channelBlock('Google Ads', client.googleAds, { hasQuality, daily: client.googleDaily })}
+    ${channelBlock('Meta Ads', client.meta, { hasQuality, daily: client.metaDaily, prior: pm, vs })}
+    ${channelBlock('Google Ads', client.googleAds, { hasQuality, daily: client.googleDaily, prior: pg, vs })}
     ${leadsBlock(client.leads)}
     ${overallTrendBlock(client.metaDaily, client.googleDaily)}
     ${internal ? balanceBlock(client.balances) : ''}
@@ -956,6 +1003,13 @@ export function renderReport({ clients, since, until, generatedAt, internal = fa
   .stat-value { display:block; font-size:21px; font-weight:650; margin-top:3px;
     letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
   .stat-sub { display:block; font-size:12px; color:var(--muted); margin-top:1px; }
+  .delta { display:inline-block; margin-left:7px; padding:1px 7px; border-radius:999px;
+    font-size:11.5px; font-weight:650; vertical-align:middle; letter-spacing:.01em; }
+  .delta.good { color:#0b6b3a; background:rgba(11,107,58,.10); }
+  .delta.bad  { color:#b0141e; background:rgba(176,20,30,.10); }
+  .delta.flat { color:var(--muted); background:var(--soft); border:1px solid var(--line); }
+  .compare-line { font-size:12.5px; color:var(--muted); margin:6px 0 0; }
+  @media print { .delta { border:1px solid currentColor; background:none; } }
   .stat.accent { border-color:color-mix(in srgb, var(--navy) 35%, var(--line)); }
   .stat.accent .stat-value { color:var(--navy); }
   .stat.win { border-color:color-mix(in srgb, var(--red) 35%, var(--line)); }

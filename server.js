@@ -94,6 +94,23 @@ function sheetConfigFor(accountId) {
 const daysBetween = (since, until) =>
   Math.max(Math.round((Date.parse(until) - Date.parse(since)) / 86400000) + 1, 1);
 
+const shiftDate = (iso, deltaDays) => {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + deltaDays);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// The window a report is compared against. "previous" is the same number of days
+// immediately before the report; a number is that many days immediately before it.
+// Either way it ends the day before the report starts, so the two never overlap.
+function compareRange({ since, until }, compare) {
+  if (!compare || compare === 'none') return null;
+  const days = compare === 'previous' ? daysBetween(since, until) : Number(compare);
+  if (!Number.isInteger(days) || days < 1 || days > 366) return null;
+  const prevUntil = shiftDate(since, -1);
+  return { since: shiftDate(prevUntil, -(days - 1)), until: prevUntil, days };
+}
+
 // Balances are only needed for the internal copy, so this costs nothing on a
 // client download. Keyed by "<platform>:<id>" because a Meta account id and a
 // Google customer id are different namespaces.
@@ -109,7 +126,7 @@ async function accountBalances() {
   return map;
 }
 
-async function buildReport({ accounts, since, until, level, internal = false }) {
+async function buildReport({ accounts, since, until, level, internal = false, light = false }) {
   // Group the selected accounts by client label so one client with both platforms
   // renders as a single block.
   const groups = new Map();
@@ -138,7 +155,7 @@ async function buildReport({ accounts, since, until, level, internal = false }) 
   }
 
   const range = { since, until };
-  const balances = internal ? await accountBalances() : new Map();
+  const balances = internal && !light ? await accountBalances() : new Map();
   const spanDays = daysBetween(since, until);
   const results = [];
   for (const group of groups.values()) {
@@ -146,11 +163,11 @@ async function buildReport({ accounts, since, until, level, internal = false }) 
       fetchMeta(group, range, level).catch((e) => ({ error: e.message })),
       fetchGoogleAds(group, range, level).catch((e) => ({ error: e.message })),
       fetchLeads(group, range).catch((e) => ({ error: e.message })),
-      group.meta
+      group.meta && !light
         ? fetchMetaGoals(group.meta.adAccountId, group.meta.campaignIds).catch(() => null)
         : null,
-      fetchMetaDaily(group, range).catch(() => []),
-      fetchGoogleAdsDaily(group, range).catch(() => []),
+      light ? [] : fetchMetaDaily(group, range).catch(() => []),
+      light ? [] : fetchGoogleAdsDaily(group, range).catch(() => []),
     ]);
 
     // When the user narrowed to specific campaigns, the Sheet has to be narrowed the
@@ -185,7 +202,7 @@ async function buildReport({ accounts, since, until, level, internal = false }) 
       name: group.name, meta, googleAds, leads: scopedLeads, goals, metaDaily, googleDaily,
       sources: group.sources,
     };
-    client.insights = analyse(client);
+    client.insights = light ? null : analyse(client);
 
     // Runway is measured per platform against that platform's own spend over the
     // same window, so "days left" reflects how fast this account actually burns.
@@ -448,7 +465,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/report') {
-      const { accounts = [], since, until, format = 'html', level = 'campaign' } =
+      const { accounts = [], since, until, format = 'html', level = 'campaign', compare = 'previous' } =
         await readBody(req);
       if (!accounts.length) return json(res, 400, { error: 'Select at least one account.' });
       if (!['campaign', 'adset', 'ad'].includes(level)) {
@@ -462,7 +479,16 @@ const server = http.createServer(async (req, res) => {
       // Preview is for you and carries the internal sections; a download is the copy
       // that gets sent to the client, so it never includes them.
       const internal = url.searchParams.get('download') === '0';
-      const clients = await buildReport({ accounts, since, until, level, internal });
+      const prior = compareRange({ since, until }, compare);
+      const [clients, priorClients] = await Promise.all([
+        buildReport({ accounts, since, until, level, internal }),
+        prior ? buildReport({ accounts, ...prior, level, light: true }) : [],
+      ]);
+      // Same accounts and selection, so client blocks line up by name.
+      if (prior) {
+        const byName = new Map(priorClients.map((c) => [c.name, c]));
+        for (const c of clients) c.previous = { ...prior, client: byName.get(c.name) || null };
+      }
       const stamp = `${since}_to_${until}`;
 
       if (format === 'csv') {

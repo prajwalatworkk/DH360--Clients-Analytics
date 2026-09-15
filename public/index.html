@@ -396,6 +396,18 @@
       <label class="field"><span>From</span><input type="date" id="since"></label>
       <label class="field"><span>To</span><input type="date" id="until"></label>
     </div>
+    <label class="field" style="margin-top:14px"><span>Compare with</span>
+      <select class="select" id="compare">
+        <option value="previous" selected>Previous period (same length)</option>
+        <option value="1">Yesterday</option>
+        <option value="3">Last 3 days before</option>
+        <option value="7">Last 7 days before</option>
+        <option value="14">Last 14 days before</option>
+        <option value="30">Last 30 days before</option>
+        <option value="90">Last 90 days before</option>
+        <option value="none">No comparison</option>
+      </select>
+    </label>
   </section>
 
   <section class="card">
@@ -838,7 +850,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           accounts, since: $('since').value, until: $('until').value,
-          format, level: state.level,
+          format, level: state.level, compare: $('compare').value,
         }),
       });
 
