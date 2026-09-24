@@ -7,6 +7,14 @@
  *
  * NOTE: this project must have zero global variables (they collide across .gs files).
  *
+ * DEPLOY SETTINGS: Execute as "Me", Who has access "Anyone". "Only myself" cannot
+ * work — the app calls this URL as a plain server request with no Google session,
+ * and would be answered with a sign-in page instead of data.
+ *
+ * "Anyone" means anyone holding the /exec URL, so the URL is a secret. Set DH360_KEY
+ * below to a long random string and the app must send it as &key=...; without it the
+ * endpoint returns nothing. Keep that key and the URL out of anything public.
+ *
  * Two modes:
  *   mode=report&tab=NAME          the sheet this script is bound to, by tab name
  *   mode=tab&ssId=ID&gid=NUMBER   ANY spreadsheet this account can open, by tab id
@@ -19,6 +27,16 @@
 function doGet(e) {
   try {
     var params = (e && e.parameter) || {};
+
+    // Shared secret. Set this to a long random string, and put the same value in the
+    // app's .env as SHEETS_KEY. Leave it empty only if you accept that anyone with
+    // the URL can read your leads.
+    var DH360_KEY = 'PUT-A-LONG-RANDOM-STRING-HERE';
+
+    if (DH360_KEY && String(params.key || '') !== DH360_KEY) {
+      return dh360Json_({ error: 'Unauthorised' });
+    }
+
     var book;
     var sheet;
 

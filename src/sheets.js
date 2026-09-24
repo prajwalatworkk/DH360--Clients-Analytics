@@ -24,6 +24,7 @@ export async function fetchLeads(client, { since, until }) {
 
   const url = new URL(endpoint);
   url.searchParams.set('mode', 'report');
+  if (process.env.SHEETS_KEY) url.searchParams.set('key', process.env.SHEETS_KEY);
   if (client.sheet.tab) url.searchParams.set('tab', client.sheet.tab);
   url.searchParams.set('since', since);
   url.searchParams.set('until', until);

@@ -174,6 +174,7 @@ async function readViaAppsScript({ ssId, gid, dateColumn }, endpoint, { since, u
   if (!endpoint) throw new Error('Apps Script: no endpoint configured.');
   const url = new URL(endpoint);
   url.searchParams.set('mode', 'tab');
+  if (process.env.SHEETS_KEY) url.searchParams.set('key', process.env.SHEETS_KEY);
   url.searchParams.set('ssId', ssId);
   url.searchParams.set('gid', gid);
   url.searchParams.set('since', since);
@@ -185,6 +186,9 @@ async function readViaAppsScript({ ssId, gid, dateColumn }, endpoint, { since, u
   if (!res.ok) throw new Error(`Apps Script: returned ${res.status}.`);
   let body;
   try { body = JSON.parse(text); } catch { throw new Error('Apps Script: did not return JSON.'); }
+  if (body.error === 'Unauthorised') {
+    throw new Error('Apps Script: wrong or missing key (set SHEETS_KEY in .env to match DH360_KEY in the script).');
+  }
   if (body.error) throw new Error(`Apps Script: ${body.error}`);
   if (!Array.isArray(body.columns)) {
     throw new Error('Apps Script: deployment is out of date (redeploy a new version).');
