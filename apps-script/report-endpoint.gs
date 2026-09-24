@@ -45,9 +45,12 @@ function doGet(e) {
       try {
         book = SpreadsheetApp.openById(params.ssId);
       } catch (openErr) {
+        // Deliberately does not name the account: Session.getEffectiveUser() needs
+        // the userinfo.email scope, which this deployment has no other reason to
+        // request, and asking for it would force a re-authorisation.
         return dh360Json_({
-          error: 'Cannot open that spreadsheet. Share it with ' +
-            Session.getEffectiveUser().getEmail() + ' (Viewer is enough).'
+          error: 'Cannot open that spreadsheet. Check the link, and that the Google '
+            + 'account running this script can open it.'
         });
       }
       var gid = String(params.gid == null ? '0' : params.gid);
