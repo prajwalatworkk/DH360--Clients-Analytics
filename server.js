@@ -246,6 +246,7 @@ async function buildReport({ accounts, since, until, level, internal = false, li
             row.hasCrm = false; row.statuses = {};
             row.junk = 0; row.disqualified = 0; row.unreached = 0;
             row.inProgress = 0; row.crmTotal = 0;
+            row.newEnquiry = 0; row.otherStatus = 0;
             continue;
           }
           first = false;
@@ -255,6 +256,8 @@ async function buildReport({ accounts, since, until, level, internal = false, li
           row.disqualified = tally.notQualified;
           row.unreached = tally.noResponse;
           row.inProgress = tally.followUp;
+          row.newEnquiry = tally.newEnquiry;
+          row.otherStatus = tally.other + tally.blank;
           row.crmTotal = tally.total;
           row.statuses = tally.statuses;
           row.sheetLeads = tally.total;

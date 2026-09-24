@@ -60,6 +60,9 @@ export const mappingKey = (platform, accountId, campaignId) =>
 // extra spaces are all normalised away first. "not qualified" must be tested before
 // "qualified" or it lands in the wrong bucket and doubles the qualified count.
 const BUCKETS = [
+  // A lead nobody has worked yet. Its own bucket rather than "other", so it never
+  // reads as a judgement the team has not actually made.
+  ['newEnquiry', /^(new.?enquiry|new.?inquiry|new.?lead|new|fresh|untouched|not.?contacted|pending|open)$/],
   ['closed', /^(closed|closed.?won|won|converted|sale|sold|customer|hired|booked)$/],
   ['notQualified', /^(not.?qualified|unqualified|disqualified|not.?interested|lost|not.?eligible)$/],
   ['junk', /^(junk|spam|invalid|fake|test|wrong.?number)$/],
@@ -129,7 +132,7 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }) {
   }
 
   const tally = {
-    total: 0, qualified: 0, notQualified: 0, closed: 0,
+    total: 0, newEnquiry: 0, qualified: 0, notQualified: 0, closed: 0,
     junk: 0, noResponse: 0, followUp: 0, other: 0, blank: 0,
   };
   const statuses = {};

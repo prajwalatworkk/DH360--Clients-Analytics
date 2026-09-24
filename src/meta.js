@@ -198,12 +198,14 @@ export function totalsOf(campaigns) {
       disqualified: add(acc.disqualified, c.disqualified),
       unreached: add(acc.unreached, c.unreached),
       inProgress: add(acc.inProgress, c.inProgress),
+      newEnquiry: add(acc.newEnquiry, c.newEnquiry),
+      otherStatus: add(acc.otherStatus, c.otherStatus),
       crmTotal: add(acc.crmTotal, c.crmTotal),
     }),
     {
       spend: 0, impressions: 0, clicks: 0, leads: 0, pixelLeads: 0, messaging: 0,
       qualified: 0, closed: 0, junk: 0, disqualified: 0, unreached: 0,
-      inProgress: 0, crmTotal: 0,
+      inProgress: 0, newEnquiry: 0, otherStatus: 0, crmTotal: 0,
     },
   );
   t.hasCrm = campaigns.some((c) => c.hasCrm);
