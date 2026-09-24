@@ -19,7 +19,7 @@ import { fetchMeta, fetchMetaDaily } from './src/meta.js';
 import { fetchGoogleAds, fetchGoogleAdsDaily } from './src/googleAds.js';
 import { fetchLeads, applyLeadQuality, scopeLeads } from './src/sheets.js';
 import {
-  parseSheetUrl, loadMap, saveMapping, mappingKey, fetchCampaignSheet,
+  parseSheetUrl, loadMap, saveMapping, mappingKey, fetchCampaignSheet, tabMismatch,
 } from './src/campaignSheets.js';
 import { fetchMetaGoals } from './src/goals.js';
 import { analyse } from './src/insights.js';
@@ -571,9 +571,11 @@ const server = http.createServer(async (req, res) => {
       const probe = await fetchCampaignSheet(mapping, endpoint, { since: '2000-01-01', until: today });
       if (probe?.error) return json(res, 400, { error: probe.error });
 
+      mapping.tabName = probe.tab || null;
       saveMapping(key, mapping);
       return json(res, 200, {
         ok: true,
+        warning: tabMismatch(campaignName, probe.tab),
         via: probe.via,
         tab: probe.tab,
         statusColumn: probe.statusColumn,

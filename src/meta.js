@@ -210,6 +210,9 @@ export function totalsOf(campaigns) {
   );
   t.hasCrm = campaigns.some((c) => c.hasCrm);
   t.fromSheet = campaigns.some((c) => c.crmSource === 'sheet');
+  // Naming the tabs on the report itself is the only place a wrong link becomes
+  // visible — the numbers it produces look entirely plausible on their own.
+  t.crmTabs = [...new Set(campaigns.map((c) => c.crmTab).filter(Boolean))];
   // Whether quality is *known* for this channel, as opposed to being zero. A real
   // zero ("nothing closed yet") must not read as "no data", or a fallback source
   // gets substituted for it and reports a number that belongs to something else.

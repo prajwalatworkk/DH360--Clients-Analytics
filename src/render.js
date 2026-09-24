@@ -116,7 +116,9 @@ function statusStrip(t) {
 
   return `<div class="statuses">
     <div class="statuses-head">
-      <span>${t.fromSheet ? 'Lead outcomes from your CRM sheet' : 'Lead outcomes from your CRM'}</span>
+      <span>${t.fromSheet
+        ? `Lead outcomes from your CRM sheet${t.crmTabs?.length ? ` \u00b7 ${esc(t.crmTabs.join(', '))}` : ''}`
+        : 'Lead outcomes from your CRM'}</span>
       <span class="muted">${num(total)} leads with a status</span>
     </div>
     <div class="status-bar">

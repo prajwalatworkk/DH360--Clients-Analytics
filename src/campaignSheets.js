@@ -34,6 +34,34 @@ export function parseSheetUrl(url) {
   return { ssId: id[1], gid: gid[1] };
 }
 
+// A tab is linked by gid, which is invisible in the Sheets UI — so the wrong tab
+// produces a perfectly valid-looking report with someone else's numbers in it. This
+// does not block the save (a team may legitimately name a tab nothing like the
+// campaign), it just says plainly what was linked to what.
+const STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'phase', 'campaign', 'leads', 'lead', 'ads', 'new',
+  'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec',
+]);
+
+const significantWords = (text) =>
+  new Set(
+    String(text || '')
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length >= 4 && !STOPWORDS.has(w) && !/^\d+$/.test(w)),
+  );
+
+export function tabMismatch(campaignName, tabName) {
+  if (!campaignName || !tabName) return null;
+  const a = significantWords(campaignName);
+  const b = significantWords(tabName);
+  if (!a.size || !b.size) return null;
+  for (const w of a) if (b.has(w)) return null;
+  return `Heads up: campaign is \u201c${campaignName}\u201d but that tab is \u201c${tabName}\u201d. `
+    + 'If that is not the tab you meant, open the right one in Sheets and copy the URL again \u2014 '
+    + 'the tab is identified by the gid in the link, which does not change when you switch tabs in the browser.';
+}
+
 export function loadMap() {
   try {
     return JSON.parse(fs.readFileSync(STORE, 'utf8'));
