@@ -751,8 +751,9 @@
       } else {
         state.crm.set(id, { url: link, tab: body.tab, campaignName });
         if (note) {
-          note.textContent = `Reading “${body.tab}” · ${body.total} leads, `
-            + `${body.qualified} qualified, ${body.closed} closed · status column “${body.statusColumn}”.`;
+          note.textContent = `Reading “${body.tab || 'that tab'}” · ${body.total} leads, `
+            + `${body.qualified} qualified, ${body.closed} closed · status column `
+            + `“${body.statusColumn}”${body.via === 'csv' ? ' · direct from Sheets' : ' · via Apps Script'}.`;
         }
       }
       const btn = $$(`[data-crm-toggle="${id}"]`);

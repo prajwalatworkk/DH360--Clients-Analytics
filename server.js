@@ -564,12 +564,9 @@ const server = http.createServer(async (req, res) => {
 
       // Read it once now, so a bad link or an unshared sheet is caught here rather
       // than silently producing an empty column in the next report.
+      // No endpoint needed for the CSV path, so a missing one is not an error here —
+      // fetchCampaignSheet tries CSV first and only then the script.
       const endpoint = process.env.SHEETS_ENDPOINT || sheetEndpointFor(accountId);
-      if (!endpoint) {
-        return json(res, 400, {
-          error: 'No Apps Script endpoint configured. Add SHEETS_ENDPOINT to .env, or a sheet endpoint for this client in clients.json.',
-        });
-      }
       const today = todayLocal();
       const probe = await fetchCampaignSheet(mapping, endpoint, { since: '2000-01-01', until: today });
       if (probe?.error) return json(res, 400, { error: probe.error });
@@ -577,6 +574,7 @@ const server = http.createServer(async (req, res) => {
       saveMapping(key, mapping);
       return json(res, 200, {
         ok: true,
+        via: probe.via,
         tab: probe.tab,
         statusColumn: probe.statusColumn,
         dateColumn: probe.dateColumn,
