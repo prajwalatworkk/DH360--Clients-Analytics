@@ -209,7 +209,11 @@ async function buildReport({ accounts, since, until, level, internal = false, li
     // sheet and the statuses the CRM syncs back into Meta — those go stale, and a
     // campaign the team keeps current should not be second-guessed by them.
     const sheetMap = loadMap();
-    const endpoint = group.sheet?.endpoint || process.env.SHEETS_ENDPOINT || null;
+    // SHEETS_ENDPOINT wins over a client's own endpoint. The per-client ones in
+    // clients.json point at each client's lead-capture script; the global one is the
+    // deployment that has been updated to read tabs by id. Preferring the client's
+    // would mean setting SHEETS_ENDPOINT had no effect wherever it is most needed.
+    const endpoint = process.env.SHEETS_ENDPOINT || group.sheet?.endpoint || null;
     const crmErrors = [];
     for (const [channel, platform, accountId] of [
       [meta, 'meta', group.meta?.adAccountId],
@@ -557,7 +561,7 @@ const server = http.createServer(async (req, res) => {
 
       // Read it once now, so a bad link or an unshared sheet is caught here rather
       // than silently producing an empty column in the next report.
-      const endpoint = sheetEndpointFor(accountId) || process.env.SHEETS_ENDPOINT;
+      const endpoint = process.env.SHEETS_ENDPOINT || sheetEndpointFor(accountId);
       if (!endpoint) {
         return json(res, 400, {
           error: 'No Apps Script endpoint configured. Add SHEETS_ENDPOINT to .env, or a sheet endpoint for this client in clients.json.',
