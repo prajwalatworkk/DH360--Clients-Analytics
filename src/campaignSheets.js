@@ -22,16 +22,12 @@ export function parseSheetUrl(url) {
   const id = text.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
   if (!id) return { error: 'That does not look like a Google Sheets link.' };
 
-  // gid can sit in the fragment (#gid=) or the query (?gid=). A link copied from the
-  // browser bar while a tab is open has it; one copied from "Share" does not, and
-  // defaults to the first tab — which would silently read the wrong campaign.
+  // gid is optional. Paste any link to the spreadsheet and pick the tab from the
+  // list the app fetches; a gid in the link only decides which tab starts selected.
+  // Requiring it here was a trap: the gid is invisible in the Sheets UI, and the
+  // address bar does not always follow the tab you clicked.
   const gid = text.match(/[#?&]gid=(\d+)/);
-  if (!gid) {
-    return {
-      error: 'That link has no tab in it. Open the campaign’s tab in Sheets and copy the URL from the address bar.',
-    };
-  }
-  return { ssId: id[1], gid: gid[1] };
+  return { ssId: id[1], gid: gid ? gid[1] : null };
 }
 
 // A tab is linked by gid, which is invisible in the Sheets UI — so the wrong tab
@@ -60,6 +56,27 @@ export function tabMismatch(campaignName, tabName) {
   return `Heads up: campaign is \u201c${campaignName}\u201d but that tab is \u201c${tabName}\u201d. `
     + 'If that is not the tab you meant, open the right one in Sheets and copy the URL again \u2014 '
     + 'the tab is identified by the gid in the link, which does not change when you switch tabs in the browser.';
+}
+
+// Every tab in a spreadsheet, for the picker. Needs the Apps Script (the CSV export
+// can fetch a tab but cannot enumerate them).
+export async function listTabs(ssId, endpoint) {
+  if (!endpoint) return { error: 'No Apps Script endpoint configured.' };
+  const url = new URL(endpoint);
+  url.searchParams.set('mode', 'tabs');
+  if (process.env.SHEETS_KEY) url.searchParams.set('key', process.env.SHEETS_KEY);
+  url.searchParams.set('ssId', ssId);
+  try {
+    const body = await fetchScriptJson(url);
+    if (body.error === 'Unauthorised') return { error: 'Wrong or missing key.' };
+    if (body.error) return { error: body.error };
+    if (!Array.isArray(body.tabs)) {
+      return { error: 'That deployment cannot list tabs yet \u2014 redeploy a new version.' };
+    }
+    return { tabs: body.tabs, spreadsheet: body.spreadsheet };
+  } catch (e) {
+    return { error: e.message };
+  }
 }
 
 export function loadMap() {
@@ -198,6 +215,36 @@ async function readViaCsv({ ssId, gid }) {
   return tableToObjects(parseCsv(text));
 }
 
+// Apps Script /exec answers with a 302 to script.googleusercontent.com. Google serves
+// that redirect differently depending on the request headers: with no User-Agent it
+// intermittently returns a 404 HTML page instead of the script's output, which looks
+// exactly like a broken deployment. Send a browser-ish UA, and retry once, since the
+// failure is intermittent rather than sticky.
+async function fetchScriptJson(url, { tries = 2 } = {}) {
+  let last;
+  for (let attempt = 0; attempt < tries; attempt += 1) {
+    try {
+      const res = await fetch(url, {
+        redirect: 'follow',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ClientReports',
+          Accept: 'application/json,text/plain,*/*',
+        },
+      });
+      const text = await res.text();
+      if (!res.ok) { last = new Error(`Apps Script: returned ${res.status}.`); continue; }
+      try {
+        return JSON.parse(text);
+      } catch {
+        last = new Error('Apps Script: did not return JSON (Google served a redirect page).');
+      }
+    } catch (e) {
+      last = new Error(`Apps Script: ${e.message}`);
+    }
+  }
+  throw last;
+}
+
 async function readViaAppsScript({ ssId, gid, dateColumn }, endpoint, { since, until }) {
   if (!endpoint) throw new Error('Apps Script: no endpoint configured.');
   const url = new URL(endpoint);
@@ -209,11 +256,7 @@ async function readViaAppsScript({ ssId, gid, dateColumn }, endpoint, { since, u
   url.searchParams.set('until', until);
   if (dateColumn) url.searchParams.set('dateColumn', dateColumn);
 
-  const res = await fetch(url, { redirect: 'follow' });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`Apps Script: returned ${res.status}.`);
-  let body;
-  try { body = JSON.parse(text); } catch { throw new Error('Apps Script: did not return JSON.'); }
+  const body = await fetchScriptJson(url);
   if (body.error === 'Unauthorised') {
     throw new Error('Apps Script: wrong or missing key (set SHEETS_KEY in .env to match DH360_KEY in the script).');
   }

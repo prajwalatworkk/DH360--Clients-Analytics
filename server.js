@@ -19,7 +19,7 @@ import { fetchMeta, fetchMetaDaily } from './src/meta.js';
 import { fetchGoogleAds, fetchGoogleAdsDaily } from './src/googleAds.js';
 import { fetchLeads, applyLeadQuality, scopeLeads } from './src/sheets.js';
 import {
-  parseSheetUrl, loadMap, saveMapping, mappingKey, fetchCampaignSheet, tabMismatch,
+  parseSheetUrl, loadMap, saveMapping, mappingKey, fetchCampaignSheet, tabMismatch, listTabs,
 } from './src/campaignSheets.js';
 import { fetchMetaGoals } from './src/goals.js';
 import { analyse } from './src/insights.js';
@@ -539,12 +539,21 @@ const server = http.createServer(async (req, res) => {
       return json(res, result.error ? 502 : 200, result);
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/sheet-tabs') {
+      const parsed = parseSheetUrl(url.searchParams.get('url') || '');
+      if (parsed.error) return json(res, 400, { error: parsed.error });
+      const endpoint = process.env.SHEETS_ENDPOINT
+        || sheetEndpointFor(url.searchParams.get('accountId') || '');
+      const result = await listTabs(parsed.ssId, endpoint);
+      return json(res, result.error ? 400 : 200, { ...result, ssId: parsed.ssId, gid: parsed.gid });
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/campaign-sheet') {
       return json(res, 200, { mappings: loadMap(), hasEndpoint: Boolean(process.env.SHEETS_ENDPOINT) });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/campaign-sheet') {
-      const { platform, accountId, campaignId, campaignName, url: link } = await readBody(req);
+      const { platform, accountId, campaignId, campaignName, url: link, gid } = await readBody(req);
       if (!platform || !accountId || !campaignId) {
         return json(res, 400, { error: 'Missing campaign.' });
       }
@@ -560,7 +569,11 @@ const server = http.createServer(async (req, res) => {
       const parsed = parseSheetUrl(link);
       if (parsed.error) return json(res, 400, { error: parsed.error });
 
-      const mapping = { ...parsed, campaignName: campaignName || null, url: String(link).trim() };
+      const chosenGid = gid != null && String(gid) !== '' ? String(gid) : parsed.gid;
+      if (!chosenGid) return json(res, 400, { error: 'Pick which tab to read.' });
+      const mapping = {
+        ...parsed, gid: chosenGid, campaignName: campaignName || null, url: String(link).trim(),
+      };
 
       // Read it once now, so a bad link or an unshared sheet is caught here rather
       // than silently producing an empty column in the next report.

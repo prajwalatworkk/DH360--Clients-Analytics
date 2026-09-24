@@ -163,6 +163,8 @@
   .btn-sm.ghost { background:none; color:var(--muted); border-color:var(--line); }
   .crm-status { flex:1 0 100%; margin:0; font-size:11.5px; color:var(--muted); line-height:1.5; }
   .crm-status.warn { color:var(--red); font-weight:600; }
+  .crm-tab { flex:1 1 200px; min-width:0; font-size:12.5px; padding:7px 10px; }
+  .crm-tab[hidden] { display:none; }
   .selected-list { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
   .selected-list:empty { display:none; }
   .chip-sel {
@@ -688,8 +690,11 @@
           </label>
           <div class="crm-panel" data-crm-panel="${key}:${c.id}" hidden>
             <input type="url" class="crm-input" data-crm-url="${key}:${c.id}"
-              placeholder="Paste the tab link from Sheets"
+              placeholder="Paste any link to the sheet"
               value="${m ? esc(m.url || '') : ''}">
+            <button type="button" class="btn-sm ghost" data-crm-tabs="${key}:${c.id}"
+              data-account="${key}">Find tabs</button>
+            <select class="select crm-tab" data-crm-gid="${key}:${c.id}" hidden></select>
             <button type="button" class="btn-sm" data-crm-save="${key}:${c.id}"
               data-campaign-name="${esc(c.name)}">Save</button>
             ${m ? `<button type="button" class="btn-sm ghost" data-crm-clear="${key}:${c.id}">Unlink</button>` : ''}
@@ -726,8 +731,40 @@
     }
   }
 
+  // Offer the spreadsheet's tabs as a list. Copying a tab URL is error-prone: the
+  // gid is invisible in Sheets and the address bar does not always follow the tab
+  // you clicked, so the wrong tab links silently.
+  async function loadTabs(id, accountKey) {
+    const input = $$(`[data-crm-url="${id}"]`);
+    const select = $$(`[data-crm-gid="${id}"]`);
+    const note = $$(`[data-crm-status="${id}"]`);
+    if (!input || !select) return;
+
+    const accountId = accountKey.slice(accountKey.indexOf(':') + 1);
+    note.classList.remove('warn');
+    note.textContent = 'Looking up the tabs…';
+
+    try {
+      const res = await fetch('/api/sheet-tabs?url=' + encodeURIComponent(input.value)
+        + '&accountId=' + encodeURIComponent(accountId));
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || `Server returned ${res.status}`);
+
+      select.innerHTML = body.tabs
+        .map((t) => `<option value="${t.gid}"${String(t.gid) === String(body.gid) ? ' selected' : ''}>${esc(t.name)}</option>`)
+        .join('');
+      select.hidden = false;
+      note.textContent = `${body.tabs.length} tabs in “${body.spreadsheet}”. Pick the one for this campaign, then Save.`;
+    } catch (err) {
+      note.textContent = err.message;
+      note.classList.add('warn');
+    }
+  }
+
   // id is "platform:accountId:campaignId" — the same key the server stores under.
   async function saveCrm(id, link, campaignName) {
+    const gidSelect = $$(`[data-crm-gid="${id}"]`);
+    const gid = gidSelect && !gidSelect.hidden ? gidSelect.value : '';
     const cut = id.lastIndexOf(':');
     const accountKey = id.slice(0, cut);
     const campaignId = id.slice(cut + 1);
@@ -741,7 +778,7 @@
       const res = await fetch('/api/campaign-sheet', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform, accountId, campaignId, campaignName, url: link }),
+        body: JSON.stringify({ platform, accountId, campaignId, campaignName, url: link, gid }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || `Server returned ${res.status}`);
@@ -797,6 +834,13 @@
       if (clear) {
         e.preventDefault();
         await saveCrm(clear.dataset.crmClear, '', '');
+        return;
+      }
+
+      const tabs = e.target.closest('[data-crm-tabs]');
+      if (tabs) {
+        e.preventDefault();
+        await loadTabs(tabs.dataset.crmTabs, tabs.dataset.account);
         return;
       }
 

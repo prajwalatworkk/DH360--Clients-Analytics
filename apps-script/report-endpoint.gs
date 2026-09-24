@@ -40,6 +40,26 @@ function doGet(e) {
     var book;
     var sheet;
 
+    // Lists every tab with its gid, so the app can offer them as a dropdown. Picking
+    // from a list beats copying a URL: the gid is invisible in the Sheets UI, and the
+    // address bar does not always follow the tab you clicked.
+    if (params.mode === 'tabs') {
+      if (!params.ssId) return dh360Json_({ error: 'Missing ssId' });
+      var listBook;
+      try {
+        listBook = SpreadsheetApp.openById(params.ssId);
+      } catch (listErr) {
+        return dh360Json_({
+          error: 'Cannot open that spreadsheet. Check the link, and that the Google '
+            + 'account running this script can open it.'
+        });
+      }
+      var tabs = listBook.getSheets().map(function (sh) {
+        return { name: sh.getName(), gid: String(sh.getSheetId()) };
+      });
+      return dh360Json_({ tabs: tabs, spreadsheet: listBook.getName() });
+    }
+
     if (params.mode === 'tab') {
       if (!params.ssId) return dh360Json_({ error: 'Missing ssId' });
       try {
