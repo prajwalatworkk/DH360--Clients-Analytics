@@ -4,16 +4,16 @@ const METRIC_FIELDS = ['spend', 'impressions', 'clicks', 'ctr', 'cpc', 'actions'
 
 // What each breakdown level asks Meta for, and how a row is labelled.
 const LEVELS = {
-  campaign: { level: 'campaign', fields: ['campaign_name'], label: (r) => r.campaign_name },
+  campaign: { level: 'campaign', fields: ['campaign_id', 'campaign_name'], label: (r) => r.campaign_name },
   adset: {
     level: 'adset',
-    fields: ['campaign_name', 'adset_name'],
+    fields: ['campaign_id', 'campaign_name', 'adset_name'],
     label: (r) => r.adset_name,
     parent: (r) => r.campaign_name,
   },
   ad: {
     level: 'ad',
-    fields: ['campaign_name', 'adset_name', 'ad_name'],
+    fields: ['campaign_id', 'campaign_name', 'adset_name', 'ad_name'],
     label: (r) => r.ad_name,
     parent: (r) => `${r.campaign_name} › ${r.adset_name}`,
   },
@@ -116,6 +116,7 @@ export async function fetchMeta(client, { since, until }, level = 'campaign') {
     name: spec.label(row),
     parent: spec.parent ? spec.parent(row) : null,
     campaignName: row.campaign_name || null,
+    campaignId: row.campaign_id != null ? String(row.campaign_id) : null,
     spend: Number(row.spend || 0),
     impressions: Number(row.impressions || 0),
     clicks: Number(row.clicks || 0),
@@ -206,6 +207,7 @@ export function totalsOf(campaigns) {
     },
   );
   t.hasCrm = campaigns.some((c) => c.hasCrm);
+  t.fromSheet = campaigns.some((c) => c.crmSource === 'sheet');
   // Whether quality is *known* for this channel, as opposed to being zero. A real
   // zero ("nothing closed yet") must not read as "no data", or a fallback source
   // gets substituted for it and reports a number that belongs to something else.

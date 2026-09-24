@@ -146,6 +146,22 @@
 
   /* What is actually going into the report — shown for both platforms at once,
      so a selection on the hidden tab can never go unnoticed. */
+  .campaign-row { border-bottom:1px solid var(--line); }
+  .campaign-row:last-child { border-bottom:0; }
+  .crm-toggle { margin-left:auto; flex:none; font-size:11px; font-weight:600;
+    border:1px solid var(--line); background:var(--bg); color:var(--muted);
+    border-radius:999px; padding:3px 10px; cursor:pointer; }
+  .crm-toggle:hover { border-color:var(--navy); color:var(--navy); }
+  .crm-toggle.on { border-color:var(--navy); color:#fff; background:var(--navy); }
+  .crm-panel { display:flex; flex-wrap:wrap; gap:8px; align-items:center;
+    padding:0 10px 12px 34px; }
+  .crm-panel[hidden] { display:none; }
+  .crm-input { flex:1 1 260px; min-width:0; font-size:12.5px; padding:7px 10px;
+    border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); }
+  .btn-sm { font-size:12px; font-weight:600; padding:7px 12px; border-radius:8px;
+    border:1px solid var(--navy); background:var(--navy); color:#fff; cursor:pointer; }
+  .btn-sm.ghost { background:none; color:var(--muted); border-color:var(--line); }
+  .crm-status { flex:1 0 100%; margin:0; font-size:11.5px; color:var(--muted); line-height:1.5; }
   .selected-list { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
   .selected-list:empty { display:none; }
   .chip-sel {
@@ -429,11 +445,13 @@
     data: null,
     platform: 'meta',
     selected: new Set(),
+    crm: new Map(),
     level: 'campaign',
     campaigns: new Map(), // account key -> campaigns fetched from the API
     picked: new Map(),    // account key -> Set of chosen campaign ids
   };
   const $ = (id) => document.getElementById(id);
+  const $$ = (sel) => document.querySelector(sel);
   // Local calendar date, not UTC. Meta and Google report in the ad account's own
   // timezone (Asia/Kolkata here); toISOString() would roll "today" back to yesterday
   // for every hour between midnight and 05:30 IST.
@@ -618,6 +636,18 @@
       : '';
   }
 
+  async function loadCrmMap() {
+    try {
+      const res = await fetch('/api/campaign-sheet');
+      const body = await res.json();
+      state.crm = new Map(Object.entries(body.mappings || {}).map(([k, v]) => {
+        // Stored as platform:accountId:campaignId, which is the same shape the
+        // campaign rows key on.
+        return [k, v];
+      }));
+    } catch { /* a missing map just means nothing is linked yet */ }
+  }
+
   // ---- campaign drill-down -------------------------------------------------
   // state.picked.get(key) is the set of campaign ids chosen inside an account.
   // Empty (or absent) means "the whole account", which is the default.
@@ -642,13 +672,30 @@
         <button class="link" data-campaign-all="${key}">All</button>
         <button class="link" data-campaign-none="${key}">None</button>
       </div>
-      ${campaigns.map((c) => `
-        <label class="campaign">
-          <input type="checkbox" data-campaign="${key}" value="${c.id}"
-            ${picked.has(c.id) ? 'checked' : ''}>
-          <span class="campaign-name">${c.name}</span>
-          ${c.active ? '' : `<span class="paused">${c.status || 'paused'}</span>`}
-        </label>`).join('')}`;
+      ${campaigns.map((c) => {
+        const m = state.crm.get(`${key}:${c.id}`);
+        return `
+        <div class="campaign-row">
+          <label class="campaign">
+            <input type="checkbox" data-campaign="${key}" value="${c.id}"
+              ${picked.has(c.id) ? 'checked' : ''}>
+            <span class="campaign-name">${esc(c.name)}</span>
+            ${c.active ? '' : `<span class="paused">${esc(c.status || 'paused')}</span>`}
+            <button type="button" class="crm-toggle ${m ? 'on' : ''}"
+              data-crm-toggle="${key}:${c.id}"
+              title="Link this campaign's CRM tab">${m ? 'CRM linked' : 'Link CRM'}</button>
+          </label>
+          <div class="crm-panel" data-crm-panel="${key}:${c.id}" hidden>
+            <input type="url" class="crm-input" data-crm-url="${key}:${c.id}"
+              placeholder="Paste the tab link from Sheets"
+              value="${m ? esc(m.url || '') : ''}">
+            <button type="button" class="btn-sm" data-crm-save="${key}:${c.id}"
+              data-campaign-name="${esc(c.name)}">Save</button>
+            ${m ? `<button type="button" class="btn-sm ghost" data-crm-clear="${key}:${c.id}">Unlink</button>` : ''}
+            <p class="crm-status" data-crm-status="${key}:${c.id}">${
+              m ? `Linked${m.tab ? ` to “${esc(m.tab)}”` : ''}.` : 'Open the campaign\u2019s tab in Sheets and copy the URL from the address bar.'}</p>
+          </div>
+        </div>`; }).join('')}`;
   }
 
   async function toggleCampaigns(key) {
@@ -678,6 +725,46 @@
     }
   }
 
+  // id is "platform:accountId:campaignId" — the same key the server stores under.
+  async function saveCrm(id, link, campaignName) {
+    const cut = id.lastIndexOf(':');
+    const accountKey = id.slice(0, cut);
+    const campaignId = id.slice(cut + 1);
+    const platform = accountKey.slice(0, accountKey.indexOf(':'));
+    const accountId = accountKey.slice(accountKey.indexOf(':') + 1);
+
+    const note = $$(`[data-crm-status="${id}"]`);
+    if (note) note.textContent = link ? 'Checking that tab…' : 'Unlinking…';
+
+    try {
+      const res = await fetch('/api/campaign-sheet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform, accountId, campaignId, campaignName, url: link }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || `Server returned ${res.status}`);
+
+      if (body.cleared) {
+        state.crm.delete(id);
+        if (note) note.textContent = 'Unlinked.';
+      } else {
+        state.crm.set(id, { url: link, tab: body.tab, campaignName });
+        if (note) {
+          note.textContent = `Reading “${body.tab}” · ${body.total} leads, `
+            + `${body.qualified} qualified, ${body.closed} closed · status column “${body.statusColumn}”.`;
+        }
+      }
+      const btn = $$(`[data-crm-toggle="${id}"]`);
+      if (btn) {
+        btn.textContent = body.cleared ? 'Link CRM' : 'CRM linked';
+        btn.classList.toggle('on', !body.cleared);
+      }
+    } catch (err) {
+      if (note) note.textContent = err.message;
+    }
+  }
+
   function setAccountChecked(key, on) {
     const box = document.querySelector(`input[data-key="${key}"]`);
     if (box) box.checked = on;
@@ -688,6 +775,31 @@
   // Bound once, on the container — the account list is re-rendered inside it.
   {
     const host = $('accounts');
+
+    host.addEventListener('click', async (e) => {
+      const toggle = e.target.closest('[data-crm-toggle]');
+      if (toggle) {
+        e.preventDefault();
+        const panel = host.querySelector(`[data-crm-panel="${toggle.dataset.crmToggle}"]`);
+        if (panel) panel.hidden = !panel.hidden;
+        return;
+      }
+
+      const clear = e.target.closest('[data-crm-clear]');
+      if (clear) {
+        e.preventDefault();
+        await saveCrm(clear.dataset.crmClear, '', '');
+        return;
+      }
+
+      const save = e.target.closest('[data-crm-save]');
+      if (save) {
+        e.preventDefault();
+        const id = save.dataset.crmSave;
+        const input = host.querySelector(`[data-crm-url="${id}"]`);
+        await saveCrm(id, input ? input.value : '', save.dataset.campaignName || '');
+      }
+    });
 
     host.addEventListener('change', (e) => {
       const campaignBox = e.target.closest('input[data-campaign]');
@@ -928,7 +1040,7 @@
   });
 
   applyDays(30);
-  loadAccounts();
+  loadCrmMap().then(loadAccounts);
 </script>
 </body>
 </html>

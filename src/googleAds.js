@@ -106,6 +106,10 @@ export async function fetchGoogleAds(client, { since, until }, level = 'campaign
     return {
       name: spec.label(r),
       id: spec.id ? spec.id(r) : null,
+      // The campaign this row belongs to, at every level — this is what a
+      // per-campaign CRM tab is keyed by.
+      campaignId: r.campaign?.id != null ? String(r.campaign.id) : null,
+      campaignName: r.campaign?.name || null,
       parent: spec.parent ? spec.parent(r) : null,
       spend,
       impressions,

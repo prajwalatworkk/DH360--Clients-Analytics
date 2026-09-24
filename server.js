@@ -18,6 +18,9 @@ import { listMetaCampaigns, listGoogleCampaigns } from './src/campaigns.js';
 import { fetchMeta, fetchMetaDaily } from './src/meta.js';
 import { fetchGoogleAds, fetchGoogleAdsDaily } from './src/googleAds.js';
 import { fetchLeads, applyLeadQuality, scopeLeads } from './src/sheets.js';
+import {
+  parseSheetUrl, loadMap, saveMapping, mappingKey, fetchCampaignSheet,
+} from './src/campaignSheets.js';
 import { fetchMetaGoals } from './src/goals.js';
 import { analyse } from './src/insights.js';
 import { totalsOf } from './src/meta.js';
@@ -77,6 +80,10 @@ function readBody(req) {
 
 // Optional: clients.json can attach a Sheet lead endpoint (and a nicer label)
 // to a discovered ad account, matched by account id.
+function sheetEndpointFor(accountId) {
+  return sheetConfigFor(accountId)?.sheet?.endpoint || null;
+}
+
 function sheetConfigFor(accountId) {
   const file = path.join(ROOT, 'clients.json');
   if (!fs.existsSync(file)) return null;
@@ -195,12 +202,73 @@ async function buildReport({ accounts, since, until, level, internal = false, li
     for (const channel of [meta, googleAds]) {
       if (!channel || channel.error) continue;
       applyLeadQuality(channel, scopedLeads);
+    }
+
+    // A campaign mapped to its own CRM tab overrides everything above. That tab is
+    // what the sales team actually updates, so it outranks both the account-wide
+    // sheet and the statuses the CRM syncs back into Meta — those go stale, and a
+    // campaign the team keeps current should not be second-guessed by them.
+    const sheetMap = loadMap();
+    const endpoint = group.sheet?.endpoint || process.env.SHEETS_ENDPOINT || null;
+    const crmErrors = [];
+    for (const [channel, platform, accountId] of [
+      [meta, 'meta', group.meta?.adAccountId],
+      [googleAds, 'google', group.googleAds?.customerId],
+    ]) {
+      if (!channel || channel.error || !accountId) continue;
+      const ids = [...new Set(channel.campaigns.map((r) => r.campaignId).filter(Boolean))];
+      const mapped = ids
+        .map((id) => [id, sheetMap[mappingKey(platform, accountId, id)]])
+        .filter(([, m]) => m);
+      if (!mapped.length) continue;
+
+      const fetched = await Promise.all(
+        mapped.map(async ([id, m]) => [id, await fetchCampaignSheet(m, endpoint, range), m]),
+      );
+
+      for (const [id, tally, m] of fetched) {
+        if (!tally) continue;
+        if (tally.error) {
+          crmErrors.push({ campaign: m.campaignName || id, message: tally.error });
+          continue;
+        }
+        // At adset/ad level several rows share one campaign, and one campaign's tab
+        // must be counted once — give it to the first row and blank the siblings.
+        let first = true;
+        for (const row of channel.campaigns) {
+          if (row.campaignId !== id) continue;
+          if (!first) {
+            row.qualified = null; row.closed = null;
+            row.hasCrm = false; row.statuses = {};
+            row.junk = 0; row.disqualified = 0; row.unreached = 0;
+            row.inProgress = 0; row.crmTotal = 0;
+            continue;
+          }
+          first = false;
+          row.qualified = tally.qualified;
+          row.closed = tally.closed;
+          row.junk = tally.junk;
+          row.disqualified = tally.notQualified;
+          row.unreached = tally.noResponse;
+          row.inProgress = tally.followUp;
+          row.crmTotal = tally.total;
+          row.statuses = tally.statuses;
+          row.sheetLeads = tally.total;
+          row.hasCrm = true;
+          row.crmSource = 'sheet';
+          row.crmTab = tally.tab;
+        }
+      }
+    }
+
+    for (const channel of [meta, googleAds]) {
+      if (!channel || channel.error) continue;
       channel.totals = totalsOf(channel.campaigns);
     }
 
     const client = {
       name: group.name, meta, googleAds, leads: scopedLeads, goals, metaDaily, googleDaily,
-      sources: group.sources,
+      sources: group.sources, crmErrors,
     };
     client.insights = light ? null : analyse(client);
 
@@ -462,6 +530,53 @@ const server = http.createServer(async (req, res) => {
       const result =
         platform === 'google' ? await listGoogleCampaigns(id) : await listMetaCampaigns(id);
       return json(res, result.error ? 502 : 200, result);
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/campaign-sheet') {
+      return json(res, 200, { mappings: loadMap(), hasEndpoint: Boolean(process.env.SHEETS_ENDPOINT) });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/campaign-sheet') {
+      const { platform, accountId, campaignId, campaignName, url: link } = await readBody(req);
+      if (!platform || !accountId || !campaignId) {
+        return json(res, 400, { error: 'Missing campaign.' });
+      }
+      const key = mappingKey(platform, accountId, campaignId);
+
+      // An empty link clears the mapping rather than erroring — that is how you
+      // unlink a campaign from the UI.
+      if (!link || !String(link).trim()) {
+        saveMapping(key, null);
+        return json(res, 200, { ok: true, cleared: true });
+      }
+
+      const parsed = parseSheetUrl(link);
+      if (parsed.error) return json(res, 400, { error: parsed.error });
+
+      const mapping = { ...parsed, campaignName: campaignName || null, url: String(link).trim() };
+
+      // Read it once now, so a bad link or an unshared sheet is caught here rather
+      // than silently producing an empty column in the next report.
+      const endpoint = sheetEndpointFor(accountId) || process.env.SHEETS_ENDPOINT;
+      if (!endpoint) {
+        return json(res, 400, {
+          error: 'No Apps Script endpoint configured. Add SHEETS_ENDPOINT to .env, or a sheet endpoint for this client in clients.json.',
+        });
+      }
+      const today = todayLocal();
+      const probe = await fetchCampaignSheet(mapping, endpoint, { since: '2000-01-01', until: today });
+      if (probe?.error) return json(res, 400, { error: probe.error });
+
+      saveMapping(key, mapping);
+      return json(res, 200, {
+        ok: true,
+        tab: probe.tab,
+        statusColumn: probe.statusColumn,
+        dateColumn: probe.dateColumn,
+        total: probe.total,
+        qualified: probe.qualified,
+        closed: probe.closed,
+      });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/report') {

@@ -6,3 +6,5 @@ logs/
 # Real account IDs + a live Sheet URL that returns client lead PII (names, phone
 # numbers). clients.example.json is the template that ships instead.
 clients.json
+
+campaign-sheets.json

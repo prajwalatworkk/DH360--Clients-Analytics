@@ -100,6 +100,15 @@ const STATUS_TONE = [
   [/^(rnr|no response|not reachable)$/, 'tone-cold'],
 ];
 
+// A campaign whose CRM tab could not be read must say so. Silently falling back to
+// the platform's own numbers is how a report ends up disagreeing with the sheet.
+function crmErrorBlock(errors) {
+  if (!errors?.length) return '';
+  return `<section class="channel"><h3>CRM sheet</h3>
+    ${errors.map((e) => `<p class="error">${esc(e.campaign)}: ${esc(e.message)}</p>`).join('')}
+  </section>`;
+}
+
 function statusStrip(t) {
   const entries = Object.entries(t.statuses || {}).sort((a, b) => b[1] - a[1]);
   if (!entries.length) return '';
@@ -107,7 +116,7 @@ function statusStrip(t) {
 
   return `<div class="statuses">
     <div class="statuses-head">
-      <span>Lead outcomes from your CRM</span>
+      <span>${t.fromSheet ? 'Lead outcomes from your CRM sheet' : 'Lead outcomes from your CRM'}</span>
       <span class="muted">${num(total)} leads with a status</span>
     </div>
     <div class="status-bar">
@@ -623,7 +632,8 @@ function channelBlock(title, data, opts = {}) {
     ? data.campaigns
         .map(
           (c) => `<tr>
-            <td>${esc(c.name)}${c.parent ? `<span class="parent">${esc(c.parent)}</span>` : ''}</td>
+            <td>${esc(c.name)}${c.parent ? `<span class="parent">${esc(c.parent)}</span>` : ''}${
+              c.crmSource === 'sheet' ? `<span class="parent">CRM tab: ${esc(c.crmTab || 'linked')}</span>` : ''}</td>
             <td class="n">${inr(c.spend)}</td>
             <td class="n">${num(c.impressions)}</td>
             <td class="n">${num(c.clicks)}</td>
@@ -650,6 +660,7 @@ function channelBlock(title, data, opts = {}) {
       ${stat('Cost per lead', t.leads ? inr(t.cpl) : '—', '', '', t.leads ? d(t.cpl, p?.cpl, true) : '')}
       ${stat('Qualified', hasQuality ? num(t.qualified) : '—', hasQuality ? `${dec(t.qualifyRate, 0)}% of leads` : 'not tracked', 'accent', hasQuality ? d(t.qualified, p?.qualified) : '')}
       ${stat('Cost per qualified lead', hasQuality && t.qualified ? inr(t.cpql) : '—', '', '', hasQuality && t.qualified ? d(t.cpql, p?.cpql, true) : '')}
+      ${stat('Not qualified', hasQuality ? num(t.disqualified) : '—', hasQuality ? `${dec((t.disqualified / (t.crmTotal || 1)) * 100, 0)}% of CRM leads` : 'not tracked', '', hasQuality ? d(t.disqualified, p?.disqualified, true) : '')}
       ${stat('Closed', hasQuality ? num(t.closed) : '—', hasQuality ? `${dec(t.closeRate, 0)}% of qualified` : 'not tracked', 'win', hasQuality ? d(t.closed, p?.closed) : '')}
       ${stat('Cost per closure', hasQuality && t.closed ? inr(t.cpClosure) : '—', '', '', hasQuality && t.closed ? d(t.cpClosure, p?.cpClosure, true) : '')}
     </div>
@@ -927,6 +938,7 @@ function clientBlock(client, { internal = false } = {}) {
     </header>
     ${channelBlock('Meta Ads', client.meta, { hasQuality, daily: client.metaDaily, prior: pm, vs })}
     ${channelBlock('Google Ads', client.googleAds, { hasQuality, daily: client.googleDaily, prior: pg, vs })}
+    ${crmErrorBlock(client.crmErrors)}
     ${leadsBlock(client.leads)}
     ${overallTrendBlock(client.metaDaily, client.googleDaily)}
     ${internal ? balanceBlock(client.balances) : ''}
