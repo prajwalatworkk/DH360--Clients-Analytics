@@ -226,8 +226,16 @@ async function buildReport({ accounts, since, until, level, internal = false, li
         .filter(([, m]) => m);
       if (!mapped.length) continue;
 
+      // The campaign id is taken from the mapping KEY, not from whatever was stored
+      // alongside it. The key is the only field guaranteed to be there — mappings
+      // saved before per-campaign scoping existed carry no id of their own — and a
+      // shared tab is split by exactly this value.
       const fetched = await Promise.all(
-        mapped.map(async ([id, m]) => [id, await fetchCampaignSheet(m, endpoint, range), m]),
+        mapped.map(async ([id, m]) => [
+          id,
+          await fetchCampaignSheet({ ...m, campaignId: m.campaignId || id }, endpoint, range),
+          m,
+        ]),
       );
 
       for (const [id, tally, m] of fetched) {
