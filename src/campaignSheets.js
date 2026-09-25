@@ -135,19 +135,33 @@ const KNOWN_HEADERS = new Set([
 ]);
 
 function headerRowIndex(values) {
-  let best = 0;
-  let bestScore = 0;
   const limit = Math.min(values.length, 500);
+  let best = null;
+
   for (let i = 0; i < limit; i += 1) {
-    let score = 0;
+    let known = 0;
+    let filled = 0;
     for (const cell of values[i]) {
-      if (KNOWN_HEADERS.has(String(cell || '').trim().toLowerCase())) score += 1;
+      const text = String(cell ?? '').trim();
+      if (!text) continue;
+      filled += 1;
+      if (KNOWN_HEADERS.has(text.toLowerCase())) known += 1;
     }
-    if (score > bestScore) { bestScore = score; best = i; }
+    if (known < 3) continue;
+
+    // Counting recognised names is not enough on its own: a sheet with a second
+    // table beside the first carries that table's header names in every data row,
+    // which scores as high as the real header. What separates them is the share of
+    // the row that is header names — a header row is almost nothing else, a data row
+    // is mostly values.
+    const ratio = known / filled;
+    if (!best || ratio > best.ratio + 0.05
+      || (Math.abs(ratio - best.ratio) <= 0.05 && known > best.known)) {
+      best = { index: i, ratio, known };
+    }
   }
-  // Three recognised names is enough to be a header and not a coincidence. Below
-  // that, assume the ordinary case of headers in row 1.
-  return bestScore >= 3 ? best : 0;
+
+  return best ? best.index : 0;
 }
 
 // Blank and repeated header cells would collapse into one another as object keys,
