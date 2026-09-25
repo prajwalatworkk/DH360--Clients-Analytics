@@ -194,6 +194,43 @@ function gridToObjects(values) {
 const STATUS_HEADERS = ['lead_status', 'status', 'lead status', 'crm status', 'stage'];
 const DATE_HEADERS = ['created_time', 'timestamp', 'date', 'created', 'lead_date', 'submitted'];
 
+// Dates in a sheet maintained by hand are not all ISO. A single stray row written
+// as "8/28//2026" was being read as undated, which meant it counted inside every
+// range — one extra closure in a September report for a lead from August.
+export function isoDate(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+
+  const iso = text.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+
+  // Tolerate repeated or mixed separators: 8/28//2026, 28-8-2026, 8.28.2026
+  const parts = text.split(/[^0-9]+/).filter(Boolean);
+  if (parts.length < 3) return null;
+
+  const [a, b, c] = parts.map(Number);
+  if (!Number.isInteger(a) || !Number.isInteger(b) || !Number.isInteger(c)) return null;
+
+  let year;
+  let first;
+  let second;
+  if (String(parts[0]).length === 4) [year, first, second] = [a, b, c];
+  else if (String(parts[2]).length === 4) [first, second, year] = [a, b, c];
+  else return null;
+  if (year < 2000 || year > 2100) return null;
+
+  // Which of the two is the month. Only decidable when one of them cannot be one;
+  // a genuinely ambiguous pair like 5/6/2026 is left unparsed rather than guessed.
+  let month;
+  let day;
+  if (first > 12 && second <= 12) { day = first; month = second; }
+  else if (second > 12 && first <= 12) { month = first; day = second; }
+  else return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 function dateColumnOf(columns, preferred) {
   if (preferred && columns.includes(preferred)) return preferred;
   const lower = columns.map((c) => String(c).trim().toLowerCase());
@@ -393,11 +430,15 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }) {
 
   // The CSV export cannot filter by date server-side, so the window is applied here.
   const dateKey = dateColumnOf(columns, mapping.dateColumn);
+  let undated = 0;
   const inRange = (row) => {
     if (!dateKey) return true;
-    const stamp = String(row[dateKey] || '').slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(stamp)) return true;
-    return stamp >= since && stamp <= until;
+    const iso = isoDate(row[dateKey]);
+    // A row whose date cannot be read is still a lead, so it is kept rather than
+    // silently dropped — but it is counted, because a row that lands in every date
+    // range is worth knowing about.
+    if (!iso) { undated += 1; return true; }
+    return iso >= since && iso <= until;
   };
 
   const kept = rows.filter(inRange);
@@ -416,6 +457,7 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }) {
     statusColumn: statusKey,
     dateColumn: dateKey,
     scopeNote,
+    undated,
     headerRow: data.headerRow ?? 0,
     tabTotal: (data.rows || []).length,
     tab: data.tab || mapping.tabName || null,
