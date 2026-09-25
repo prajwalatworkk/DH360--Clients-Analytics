@@ -123,6 +123,60 @@ export function bucketFor(status) {
   return 'other';
 }
 
+// Header names a Meta lead export uses. Used to find the header ROW, which is not
+// reliably row 1: when a newer export is appended below an older one, the header
+// lands in the middle of the tab. Taking row 1 on faith reads a data row as the
+// column names, and then every lookup silently returns the wrong column.
+const KNOWN_HEADERS = new Set([
+  'id', 'created_time', 'ad_id', 'ad_name', 'adset_id', 'adset_name', 'campaign_id',
+  'campaign_name', 'form_id', 'form_name', 'is_organic', 'platform', 'full_name',
+  'phone_number', 'email', 'lead_status', 'status', 'timestamp', 'name', 'phone',
+  'source', 'campaign', 'date', 'stage',
+]);
+
+function headerRowIndex(values) {
+  let best = 0;
+  let bestScore = 0;
+  const limit = Math.min(values.length, 500);
+  for (let i = 0; i < limit; i += 1) {
+    let score = 0;
+    for (const cell of values[i]) {
+      if (KNOWN_HEADERS.has(String(cell || '').trim().toLowerCase())) score += 1;
+    }
+    if (score > bestScore) { bestScore = score; best = i; }
+  }
+  // Three recognised names is enough to be a header and not a coincidence. Below
+  // that, assume the ordinary case of headers in row 1.
+  return bestScore >= 3 ? best : 0;
+}
+
+// Blank and repeated header cells would collapse into one another as object keys,
+// taking their columns' data with them.
+function uniqueHeaders(row) {
+  const seen = new Map();
+  return row.map((cell, i) => {
+    const name = String(cell || '').trim() || `col_${i}`;
+    const n = (seen.get(name) || 0) + 1;
+    seen.set(name, n);
+    return n === 1 ? name : `${name} (${n})`;
+  });
+}
+
+function gridToObjects(values) {
+  if (!values?.length) return { columns: [], rows: [] };
+  const h = headerRowIndex(values);
+  const columns = uniqueHeaders(values[h]);
+  const rows = [];
+  values.forEach((line, i) => {
+    if (i === h) return;
+    if (line.every((c) => String(c ?? '').trim() === '')) return;
+    const obj = {};
+    columns.forEach((c, j) => { obj[c] = line[j] == null ? '' : String(line[j]); });
+    rows.push(obj);
+  });
+  return { columns, rows, headerRow: h };
+}
+
 const STATUS_HEADERS = ['lead_status', 'status', 'lead status', 'crm status', 'stage'];
 const DATE_HEADERS = ['created_time', 'timestamp', 'date', 'created', 'lead_date', 'submitted'];
 
@@ -185,19 +239,6 @@ function parseCsv(text) {
   return rows;
 }
 
-function tableToObjects(table) {
-  if (!table.length) return { columns: [], rows: [] };
-  const columns = table[0].map((c) => String(c).trim());
-  const rows = [];
-  for (const line of table.slice(1)) {
-    if (line.every((c) => String(c).trim() === '')) continue;
-    const obj = {};
-    columns.forEach((c, i) => { obj[c] = line[i] == null ? '' : String(line[i]); });
-    rows.push(obj);
-  }
-  return { columns, rows };
-}
-
 async function readViaCsv({ ssId, gid }) {
   const url = `https://docs.google.com/spreadsheets/d/${ssId}/export?format=csv&gid=${gid}`;
   const res = await fetch(url, { redirect: 'follow' });
@@ -212,7 +253,7 @@ async function readViaCsv({ ssId, gid }) {
   // A sign-in page comes back as 200 HTML, not CSV — catch that rather than
   // parsing a login form into lead rows.
   if (/^\s*</.test(text)) throw new Error('CSV export: sheet is private (Google returned a sign-in page).');
-  return tableToObjects(parseCsv(text));
+  return gridToObjects(parseCsv(text));
 }
 
 // Apps Script /exec answers with a 302 to script.googleusercontent.com. Google serves
@@ -261,10 +302,14 @@ async function readViaAppsScript({ ssId, gid, dateColumn }, endpoint, { since, u
     throw new Error('Apps Script: wrong or missing key (set SHEETS_KEY in .env to match DH360_KEY in the script).');
   }
   if (body.error) throw new Error(`Apps Script: ${body.error}`);
+  // Newer deployments hand back the raw grid so the header row can be found here.
+  if (Array.isArray(body.values)) {
+    return { ...gridToObjects(body.values), tab: body.tab };
+  }
   if (!Array.isArray(body.columns)) {
     throw new Error('Apps Script: deployment is out of date (redeploy a new version).');
   }
-  return { columns: body.columns, rows: body.rows || [], tab: body.tab, dateColumn: body.dateColumn };
+  return { columns: body.columns, rows: body.rows || [], tab: body.tab };
 }
 
 // Read one mapped tab and tally it. Returns null when the campaign has no mapping.
@@ -304,6 +349,34 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }) {
   };
   const statuses = {};
 
+  // A general pipeline tab carries several campaigns' leads. Narrow to this one, or
+  // the campaign's report shows every campaign that shares the tab.
+  const campaignIdKey = columns.find((c) => c.trim().toLowerCase() === 'campaign_id');
+  const campaignNameKey = columns.find((c) => c.trim().toLowerCase() === 'campaign_name');
+  let scopeNote = null;
+  let rows = data.rows || [];
+
+  if (mapping.campaignId && campaignIdKey) {
+    // Meta writes the id as "c:120249481815510660" in some exports and bare in others.
+    const want = String(mapping.campaignId);
+    const hit = rows.filter((r) => String(r[campaignIdKey] || '').replace(/^c:/, '') === want);
+    if (hit.length) {
+      rows = hit;
+      scopeNote = `campaign_id ${want}`;
+    } else if (new Set(rows.map((r) => r[campaignIdKey])).size > 1) {
+      // The tab holds several campaigns and none of them is this one: counting all of
+      // them would be worse than saying so.
+      return {
+        error: `That tab holds leads for other campaigns, and none for campaign ${want}. `
+          + 'Check it is the right tab.',
+      };
+    }
+  } else if (mapping.campaignName && campaignNameKey) {
+    const want = String(mapping.campaignName).trim().toLowerCase();
+    const hit = rows.filter((r) => String(r[campaignNameKey] || '').trim().toLowerCase() === want);
+    if (hit.length) { rows = hit; scopeNote = `campaign_name "${mapping.campaignName}"`; }
+  }
+
   // The CSV export cannot filter by date server-side, so the window is applied here.
   const dateKey = dateColumnOf(columns, mapping.dateColumn);
   const inRange = (row) => {
@@ -313,7 +386,7 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }) {
     return stamp >= since && stamp <= until;
   };
 
-  const kept = (data.rows || []).filter(inRange);
+  const kept = rows.filter(inRange);
 
   for (const row of kept) {
     tally.total += 1;
@@ -328,6 +401,9 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }) {
     statuses,
     statusColumn: statusKey,
     dateColumn: dateKey,
+    scopeNote,
+    headerRow: data.headerRow ?? 0,
+    tabTotal: (data.rows || []).length,
     tab: data.tab || mapping.tabName || null,
     via: data.via,
     rows: kept.slice(-50).reverse(),

@@ -88,57 +88,48 @@ function doGet(e) {
     }
 
     var values = sheet.getDataRange().getValues();
-    if (values.length < 2) return dh360Json_({ columns: [], rows: [], tab: sheet.getName() });
+    var tz = Session.getScriptTimeZone();
 
-    var columns = values[0].map(function (c) { return String(c); });
-
-    // Which column carries the lead's date. Named explicitly, else the first header
-    // that reads like a timestamp, else the first column — matching the old behaviour.
-    var dateIdx = 0;
-    if (params.dateColumn) {
-      for (var d = 0; d < columns.length; d++) {
-        if (columns[d].toLowerCase() === String(params.dateColumn).toLowerCase()) { dateIdx = d; break; }
-      }
-    } else {
-      for (var h = 0; h < columns.length; h++) {
-        var name = columns[h].toLowerCase();
-        if (name.indexOf('time') > -1 || name.indexOf('date') > -1 || name.indexOf('stamp') > -1) {
-          dateIdx = h;
-          break;
+    if (params.mode === 'tab') {
+      // Raw grid, headers and all. Which row holds the headers is not always row 1 —
+      // an export appended below an older one puts a header row in the middle — so
+      // that decision is made by the app, where it can change without redeploying.
+      var out = [];
+      for (var i = 0; i < values.length && i < 20000; i++) {
+        var line = [];
+        for (var j = 0; j < values[i].length; j++) {
+          var cell = values[i][j];
+          line.push(
+            cell instanceof Date
+              ? Utilities.formatDate(cell, tz, "yyyy-MM-dd'T'HH:mm:ss")
+              : String(cell)
+          );
         }
+        out.push(line);
       }
+      return dh360Json_({ values: out, tab: sheet.getName() });
     }
 
-    var tz = Session.getScriptTimeZone();
+    // mode=report keeps its original shape: row 1 is the header, rows filtered by date.
+    if (values.length < 2) return dh360Json_({ columns: [], rows: [] });
+
+    var columns = values[0].map(function (c) { return String(c); });
     var since = params.since || '0000-01-01';
     var until = params.until || '9999-12-31';
 
     var rows = [];
-    for (var i = 1; i < values.length; i++) {
-      var blank = true;
+    for (var r = 1; r < values.length; r++) {
       var obj = {};
-      for (var j = 0; j < columns.length; j++) {
-        var cell = values[i][j];
-        if (cell !== '' && cell !== null) blank = false;
-        obj[columns[j]] =
-          cell instanceof Date
-            ? Utilities.formatDate(cell, tz, "yyyy-MM-dd'T'HH:mm:ss")
-            : String(cell);
+      for (var c2 = 0; c2 < columns.length; c2++) {
+        var v = values[r][c2];
+        obj[columns[c2]] =
+          v instanceof Date ? Utilities.formatDate(v, tz, "yyyy-MM-dd'T'HH:mm:ss") : String(v);
       }
-      if (blank) continue;
-      var stamp = String(obj[columns[dateIdx]] || '').slice(0, 10);
-      // A row whose date cell is empty or unparseable is still a lead — keep it
-      // rather than silently dropping it out of the client's totals.
-      if (/^\d{4}-\d{2}-\d{2}$/.test(stamp) && !(stamp >= since && stamp <= until)) continue;
-      rows.push(obj);
+      var stamp = String(obj[columns[0]] || '').slice(0, 10);
+      if (stamp >= since && stamp <= until) rows.push(obj);
     }
 
-    return dh360Json_({
-      columns: columns,
-      rows: rows,
-      tab: sheet.getName(),
-      dateColumn: columns[dateIdx]
-    });
+    return dh360Json_({ columns: columns, rows: rows, tab: sheet.getName() });
   } catch (err) {
     return dh360Json_({ error: String(err) });
   }

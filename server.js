@@ -572,7 +572,11 @@ const server = http.createServer(async (req, res) => {
       const chosenGid = gid != null && String(gid) !== '' ? String(gid) : parsed.gid;
       if (!chosenGid) return json(res, 400, { error: 'Pick which tab to read.' });
       const mapping = {
-        ...parsed, gid: chosenGid, campaignName: campaignName || null, url: String(link).trim(),
+        ...parsed,
+        gid: chosenGid,
+        campaignId,
+        campaignName: campaignName || null,
+        url: String(link).trim(),
       };
 
       // Read it once now, so a bad link or an unshared sheet is caught here rather
