@@ -120,9 +120,12 @@ function deltaPill(cur, prev, { lowerIsBetter = false, title = '' } = {}) {
 
 const fmtDay = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 
-function compareLine(previous) {
+function compareLine(previous, broke = false) {
   if (!previous) return '';
   const label = previous.days === 1 ? 'the day before' : `the previous ${previous.days} days`;
+  if (broke) {
+    return `<p class="compare-line warn-line">Could not load ${esc(label)} (${esc(fmtDay(previous.since))} – ${esc(fmtDay(previous.until))}), so no change figures are shown. Refresh to try again.</p>`;
+  }
   return `<p class="compare-line">▲▼ compared with ${esc(label)} · ${esc(fmtDay(previous.since))} – ${esc(fmtDay(previous.until))}</p>`;
 }
 
@@ -959,9 +962,15 @@ function clientBlock(client, { internal = false } = {}) {
 
   // Prior-window headline, built the same way so like compares with like.
   const pv = client.previous?.client;
+  // A comparison window that failed to load must not be read as a window of zeroes.
+  // Treating a failed fetch as 0 made every stat show "new", which says "nothing
+  // existed before" — the opposite of "I could not find out".
+  const priorBroke = Boolean(
+    (pv?.meta && pv.meta.error) || (pv?.googleAds && pv.googleAds.error) || (client.previous && !pv),
+  );
   const pm = pv?.meta && !pv.meta.error ? pv.meta.totals : null;
   const pg = pv?.googleAds && !pv.googleAds.error ? pv.googleAds.totals : null;
-  const prior = pv ? {
+  const prior = pv && !priorBroke ? {
     spend: (pm?.spend || 0) + (pg?.spend || 0),
     leads: (pm?.leads || 0) + (pg?.leads || 0),
     qualified: (pm?.qualified || 0) + (pg?.qualified || 0),
@@ -976,7 +985,7 @@ function clientBlock(client, { internal = false } = {}) {
       <h2>${esc(client.name)}</h2>
       ${sourcesLine(client.sources)}
       ${goalBanner(client.goals)}
-      ${compareLine(client.previous)}
+      ${compareLine(client.previous, priorBroke)}
       <div class="headline">
         ${stat('Ad spend', inr(spend), '', '', d(spend, prior?.spend, true))}
         ${stat('Leads', num(leadCount), leadCount ? `${inr(spend / leadCount)} per lead` : '', 'accent', d(leadCount, prior?.leads))}
@@ -1085,6 +1094,7 @@ export function renderReport({ clients, since, until, generatedAt, internal = fa
   .delta.bad  { color:#b0141e; background:rgba(176,20,30,.10); }
   .delta.flat { color:var(--muted); background:var(--soft); border:1px solid var(--line); }
   .compare-line { font-size:12.5px; color:var(--muted); margin:6px 0 0; }
+  .compare-line.warn-line { color:var(--red); font-weight:600; }
   @media print { .delta { border:1px solid currentColor; background:none; } }
   .stat.accent { border-color:color-mix(in srgb, var(--navy) 35%, var(--line)); }
   .stat.accent .stat-value { color:var(--navy); }

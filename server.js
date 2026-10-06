@@ -133,7 +133,7 @@ async function accountBalances() {
   return map;
 }
 
-async function buildReport({ accounts, since, until, level, internal = false, light = false }) {
+async function buildReport({ accounts, since, until, level, internal = false, light = false, sheetCache }) {
   // Group the selected accounts by client label so one client with both platforms
   // renders as a single block.
   const groups = new Map();
@@ -230,13 +230,20 @@ async function buildReport({ accounts, since, until, level, internal = false, li
       // alongside it. The key is the only field guaranteed to be there — mappings
       // saved before per-campaign scoping existed carry no id of their own — and a
       // shared tab is split by exactly this value.
-      const fetched = await Promise.all(
-        mapped.map(async ([id, m]) => [
+      // One at a time, not in parallel. A report with several linked campaigns fires
+      // one Apps Script call each, and a comparison window doubles that; sent at once
+      // Google rate-limits some of them, which previously surfaced as a comparison
+      // window of zeroes rather than as an error.
+      const fetched = [];
+      for (const [id, m] of mapped) {
+        fetched.push([
           id,
-          await fetchCampaignSheet({ ...m, campaignId: m.campaignId || id }, endpoint, range),
+          await fetchCampaignSheet(
+            { ...m, campaignId: m.campaignId || id }, endpoint, range, sheetCache,
+          ),
           m,
-        ]),
-      );
+        ]);
+      }
 
       for (const [id, tally, m] of fetched) {
         if (!tally) continue;
@@ -631,10 +638,18 @@ const server = http.createServer(async (req, res) => {
       }
 
       const prior = compareRange({ since, until }, compare);
-      const [clients, priorClients] = await Promise.all([
-        buildReport({ accounts, since, until, level, internal: true }),
-        prior ? buildReport({ accounts, ...prior, level, light: true }) : [],
-      ]);
+      // Sequential, not concurrent. Each window issues one Apps Script call per linked
+      // campaign; running both windows at once doubles that burst and Google starts
+      // refusing some, which costs a campaign its CRM numbers for that run.
+      // Shared across both windows: the same tab serves the current period and the
+      // comparison, so it is read once.
+      const sheetCache = new Map();
+      const clients = await buildReport({
+        accounts, since, until, level, internal: true, sheetCache,
+      });
+      const priorClients = prior
+        ? await buildReport({ accounts, ...prior, level, light: true, sheetCache })
+        : [];
       if (prior) {
         const byName = new Map(priorClients.map((c) => [c.name, c]));
         for (const c of clients) c.previous = { ...prior, client: byName.get(c.name) || null };
@@ -668,10 +683,11 @@ const server = http.createServer(async (req, res) => {
       // that gets sent to the client, so it never includes them.
       const internal = url.searchParams.get('download') === '0';
       const prior = compareRange({ since, until }, compare);
-      const [clients, priorClients] = await Promise.all([
-        buildReport({ accounts, since, until, level, internal }),
-        prior ? buildReport({ accounts, ...prior, level, light: true }) : [],
-      ]);
+      const sheetCache = new Map();
+      const clients = await buildReport({ accounts, since, until, level, internal, sheetCache });
+      const priorClients = prior
+        ? await buildReport({ accounts, ...prior, level, light: true, sheetCache })
+        : [];
       // Same accounts and selection, so client blocks line up by name.
       if (prior) {
         const byName = new Map(priorClients.map((c) => [c.name, c]));

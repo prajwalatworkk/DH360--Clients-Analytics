@@ -312,9 +312,12 @@ async function readViaCsv({ ssId, gid }) {
 // intermittently returns a 404 HTML page instead of the script's output, which looks
 // exactly like a broken deployment. Send a browser-ish UA, and retry once, since the
 // failure is intermittent rather than sticky.
-async function fetchScriptJson(url, { tries = 2 } = {}) {
+async function fetchScriptJson(url, { tries = 3 } = {}) {
   let last;
   for (let attempt = 0; attempt < tries; attempt += 1) {
+    // Back off before retrying. An immediate retry hits the same rate limit that
+    // refused the first call, so the second attempt fails for the same reason.
+    if (attempt > 0) await new Promise((r) => setTimeout(r, attempt * 1200));
     try {
       const res = await fetch(url, {
         redirect: 'follow',
@@ -337,15 +340,13 @@ async function fetchScriptJson(url, { tries = 2 } = {}) {
   throw last;
 }
 
-async function readViaAppsScript({ ssId, gid, dateColumn }, endpoint, { since, until }) {
+async function readViaAppsScript({ ssId, gid, dateColumn }, endpoint) {
   if (!endpoint) throw new Error('Apps Script: no endpoint configured.');
   const url = new URL(endpoint);
   url.searchParams.set('mode', 'tab');
   if (process.env.SHEETS_KEY) url.searchParams.set('key', process.env.SHEETS_KEY);
   url.searchParams.set('ssId', ssId);
   url.searchParams.set('gid', gid);
-  url.searchParams.set('since', since);
-  url.searchParams.set('until', until);
   if (dateColumn) url.searchParams.set('dateColumn', dateColumn);
 
   const body = await fetchScriptJson(url);
@@ -364,14 +365,19 @@ async function readViaAppsScript({ ssId, gid, dateColumn }, endpoint, { since, u
 }
 
 // Read one mapped tab and tally it. Returns null when the campaign has no mapping.
-export async function fetchCampaignSheet(mapping, endpoint, { since, until }) {
-  if (!mapping) return null;
+// Reading a tab is the expensive part, and the result does not depend on which
+// campaign or which date window asked for it — both of those are applied locally.
+// So each distinct tab is fetched once per report and shared: two campaigns on one
+// tab compared against a previous period went from four round trips to one.
+async function readTab(mapping, endpoint, cache) {
+  const key = `${mapping.ssId}:${mapping.gid}`;
+  if (cache?.has(key)) return cache.get(key);
 
   const attempts = [];
   let data = null;
   for (const [name, run] of [
     ['csv', () => readViaCsv(mapping)],
-    ['script', () => readViaAppsScript(mapping, endpoint, { since, until })],
+    ['script', () => readViaAppsScript(mapping, endpoint)],
   ]) {
     try {
       data = await run();
@@ -381,12 +387,22 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }) {
       attempts.push(e.message);
     }
   }
-  if (!data) {
-    return {
-      error: `Could not read that tab. ${attempts.join(' ')} `
-        + 'Either set the sheet to "Anyone with the link \u2192 Viewer", or redeploy the Apps Script.',
-    };
-  }
+
+  const result = data || {
+    error: `Could not read that tab. ${attempts.join(' ')} `
+      + 'Either set the sheet to "Anyone with the link \u2192 Viewer", or redeploy the Apps Script.',
+  };
+  // Failures are cached too, so one unreachable tab is not retried once per campaign
+  // per window — it already exhausted its own retries inside the fetch.
+  cache?.set(key, result);
+  return result;
+}
+
+export async function fetchCampaignSheet(mapping, endpoint, { since, until }, cache) {
+  if (!mapping) return null;
+
+  const data = await readTab(mapping, endpoint, cache);
+  if (data.error) return { error: data.error };
 
   const columns = data.columns;
   const statusKey = statusColumnOf(columns, mapping.statusColumn);
