@@ -40,6 +40,58 @@ function logoMarkup() {
   return `<span class="wordmark">Digital<span class="wordmark-alt">Hub</span><span class="wordmark-red">360</span></span>`;
 }
 
+// Shown only on the live preview, never on a downloaded copy — a client's report
+// should not carry a refresher that points back at this machine.
+const LIVE_CONTROL = `<div class="live">
+  <span>Auto-refresh</span>
+  <select id="live-every">
+    <option value="0">Off</option>
+    <option value="60">Every minute</option>
+    <option value="300">Every 5 minutes</option>
+    <option value="900">Every 15 minutes</option>
+  </select>
+  <button type="button" id="live-now">Refresh now</button>
+  <span class="live-age" id="live-age"></span>
+</div>
+<script>
+(function () {
+  var sel = document.getElementById('live-every');
+  var age = document.getElementById('live-age');
+  var built = Date.now();
+  var timer = null;
+
+  // The chosen interval has to outlive the reload it causes, so it is remembered
+  // rather than reset to Off every time the page comes back.
+  try {
+    var saved = localStorage.getItem('dh360-live-every');
+    if (saved !== null) sel.value = saved;
+  } catch (e) {}
+
+  function schedule() {
+    if (timer) { clearInterval(timer); timer = null; }
+    var secs = Number(sel.value || 0);
+    if (secs > 0) timer = setInterval(function () { location.reload(); }, secs * 1000);
+  }
+
+  function tick() {
+    var s = Math.round((Date.now() - built) / 1000);
+    age.textContent = s < 60
+      ? 'updated ' + s + 's ago'
+      : 'updated ' + Math.floor(s / 60) + 'm ' + (s % 60) + 's ago';
+  }
+
+  sel.addEventListener('change', function () {
+    try { localStorage.setItem('dh360-live-every', sel.value); } catch (e) {}
+    schedule();
+  });
+  document.getElementById('live-now').addEventListener('click', function () { location.reload(); });
+
+  schedule();
+  tick();
+  setInterval(tick, 1000);
+}());
+</script>`;
+
 function stat(label, value, sub, tone = '', delta = '') {
   return `<div class="stat ${tone}"><span class="stat-label">${esc(label)}</span>
     <span class="stat-value">${esc(value)}${delta}</span>
@@ -951,7 +1003,7 @@ function clientBlock(client, { internal = false } = {}) {
 // `internal` decides whether this copy is for you or for the client. The internal
 // copy carries the optimisation findings and the account balances; the client copy
 // is the same performance data with those two sections left out.
-export function renderReport({ clients, since, until, generatedAt, internal = false }) {
+export function renderReport({ clients, since, until, generatedAt, internal = false, live = false }) {
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -990,6 +1042,16 @@ export function renderReport({ clients, since, until, generatedAt, internal = fa
   .wordmark-alt { color:#fff; opacity:.85; }
   .wordmark-red { color:var(--orange); }
   .masthead h1 { font-size:19px; margin:0; font-weight:600; letter-spacing:-.01em; }
+  .live { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12.5px; }
+  .live select { font:inherit; font-size:12px; padding:3px 7px; border-radius:7px;
+    border:1px solid rgba(255,255,255,.35); background:rgba(255,255,255,.12); color:#fff; }
+  .live select option { color:#101725; }
+  .live button { font:inherit; font-size:12px; font-weight:600; padding:3px 10px;
+    border-radius:7px; border:1px solid rgba(255,255,255,.35);
+    background:rgba(255,255,255,.12); color:#fff; cursor:pointer; }
+  .live button:hover { background:rgba(255,255,255,.22); }
+  .live-age { opacity:.78; }
+  @media print { .live { display:none; } }
   .masthead .meta { font-size:13px; opacity:.78; margin-top:3px; }
   .masthead .right { text-align:right; }
 
@@ -1230,6 +1292,7 @@ export function renderReport({ clients, since, until, generatedAt, internal = fa
     <div class="right">
       <h1>Ad performance report</h1>
       <div class="meta">${esc(since)} → ${esc(until)} · generated ${esc(generatedAt)}</div>
+      ${live ? LIVE_CONTROL : ''}
     </div>
   </div></div>
   <div class="wrap">

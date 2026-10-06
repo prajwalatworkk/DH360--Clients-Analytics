@@ -611,6 +611,47 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    // A preview served from a real URL, regenerated on every request. The old
+    // preview opened a blob: a snapshot frozen at the moment it was built, which
+    // no amount of reloading could update — the cause of the report looking stale
+    // while the underlying sheet was already current.
+    if (req.method === 'GET' && url.pathname === '/report') {
+      let spec;
+      try {
+        spec = JSON.parse(Buffer.from(url.searchParams.get('q') || '', 'base64url').toString('utf8'));
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'text/plain', ...NO_STORE });
+        return res.end('Bad report link.');
+      }
+      const { accounts = [], since, until, level = 'campaign', compare = 'previous' } = spec;
+      if (!accounts.length || !/^\d{4}-\d{2}-\d{2}$/.test(since)
+        || !/^\d{4}-\d{2}-\d{2}$/.test(until)) {
+        res.writeHead(400, { 'Content-Type': 'text/plain', ...NO_STORE });
+        return res.end('That report link is incomplete.');
+      }
+
+      const prior = compareRange({ since, until }, compare);
+      const [clients, priorClients] = await Promise.all([
+        buildReport({ accounts, since, until, level, internal: true }),
+        prior ? buildReport({ accounts, ...prior, level, light: true }) : [],
+      ]);
+      if (prior) {
+        const byName = new Map(priorClients.map((c) => [c.name, c]));
+        for (const c of clients) c.previous = { ...prior, client: byName.get(c.name) || null };
+      }
+
+      const html = renderReport({
+        clients,
+        since,
+        until,
+        generatedAt: new Date().toLocaleString('en-IN'),
+        internal: true,
+        live: true,
+      });
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', ...NO_STORE });
+      return res.end(html);
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/report') {
       const { accounts = [], since, until, format = 'html', level = 'campaign', compare = 'previous' } =
         await readBody(req);

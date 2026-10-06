@@ -998,12 +998,35 @@
     el.hidden = !message;
   }
 
+  // The preview is a real URL the server rebuilds on each request, so the tab can
+  // refresh itself. Downloads stay as blobs — a file sent to a client must be a
+  // fixed snapshot, not something that re-runs.
+  function previewUrl(accounts) {
+    const spec = {
+      accounts,
+      since: $('since').value,
+      until: $('until').value,
+      level: state.level,
+      compare: $('compare').value,
+    };
+    const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(spec))))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return '/report?q=' + b64;
+  }
+
   async function generate(format, mode) {
     const accounts = selectedAccounts();
     if (!accounts.length) return showError('Select at least one ad account first.');
     showError('');
 
     const buttons = [$('download'), $('preview'), $('csv')];
+
+    if (mode === 'preview') {
+      window.open(previewUrl(accounts), '_blank');
+      $('status').textContent = 'Opened in a new tab.';
+      return;
+    }
+
     for (const b of buttons) b.disabled = true;
     $('status').textContent = 'Pulling data…';
 
