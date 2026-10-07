@@ -92,9 +92,21 @@ const LIVE_CONTROL = `<div class="live">
 }());
 </script>`;
 
-function stat(label, value, sub, tone = '', delta = '') {
+// `prev` is the same figure for the comparison window, already formatted. When it is
+// present the card reads previous \u2192 current, so the change is visible as two
+// numbers rather than only as a percentage you have to work backwards from.
+function stat(label, value, sub, tone = '', delta = '', prev = null, prevLabel = '') {
+  const body = prev != null
+    ? `<span class="stat-pair">
+         <span class="stat-prev">${esc(prev)}</span>
+         <span class="stat-arrow" aria-hidden="true">\u2192</span>
+         <span class="stat-value">${esc(value)}</span>
+       </span>
+       <span class="stat-scale"><span>${esc(prevLabel || 'previous')} \u2192 now</span>${delta}</span>`
+    : `<span class="stat-value">${esc(value)}${delta}</span>`;
+
   return `<div class="stat ${tone}"><span class="stat-label">${esc(label)}</span>
-    <span class="stat-value">${esc(value)}${delta}</span>
+    ${body}
     ${sub ? `<span class="stat-sub">${esc(sub)}</span>` : ''}</div>`;
 }
 
@@ -682,6 +694,7 @@ function channelBlock(title, data, opts = {}) {
   const pixelSuspect = t.pixelLeads > Math.max(t.clicks, 1) * 1.5;
 
   const p = opts.prior || null;
+  const pl = opts.prevLabel || 'previous';
   const d = (cur, prev, lowerIsBetter = false) =>
     p ? deltaPill(cur, prev, { lowerIsBetter, title: opts.vs || '' }) : '';
 
@@ -710,17 +723,40 @@ function channelBlock(title, data, opts = {}) {
   return `<section class="channel">
     <h3>${esc(title)}</h3>
     <div class="stats">
-      ${stat('Spend', inr(t.spend), '', '', d(t.spend, p?.spend, true))}
-      ${stat('Impressions', num(t.impressions), '', '', d(t.impressions, p?.impressions))}
-      ${stat('Clicks', num(t.clicks), `${dec(t.ctr)}% CTR`, '', d(t.clicks, p?.clicks))}
-      ${stat('Leads', num(t.leads), title === 'Meta Ads' ? 'Meta lead forms' : 'Google Ads conversions', 'accent', d(t.leads, p?.leads))}
-      ${stat('Cost per lead', t.leads ? inr(t.cpl) : '—', '', '', t.leads ? d(t.cpl, p?.cpl, true) : '')}
-      ${stat('Qualified', hasQuality ? num(t.qualified) : '—', hasQuality ? `${dec(t.qualifyRate, 0)}% of leads` : 'not tracked', 'accent', hasQuality ? d(t.qualified, p?.qualified) : '')}
-      ${stat('Cost per qualified lead', hasQuality && t.qualified ? inr(t.cpql) : '—', '', '', hasQuality && t.qualified ? d(t.cpql, p?.cpql, true) : '')}
-      ${stat('Not qualified', hasQuality ? num(t.disqualified) : '—', hasQuality ? `${dec((t.disqualified / (t.crmTotal || 1)) * 100, 0)}% of CRM leads` : 'not tracked', '', hasQuality ? d(t.disqualified, p?.disqualified, true) : '')}
-      ${stat('Closed', hasQuality ? num(t.closed) : '—', hasQuality ? `${dec(t.closeRate, 0)}% of qualified` : 'not tracked', 'win', hasQuality ? d(t.closed, p?.closed) : '')}
-      ${stat('Cost per closure', hasQuality && t.closed ? inr(t.cpClosure) : '—', '', '', hasQuality && t.closed ? d(t.cpClosure, p?.cpClosure, true) : '')}
+      ${stat('Spend', inr(t.spend), '', '', d(t.spend, p?.spend, true), p ? inr(p.spend) : null, pl)}
+      ${stat('Leads', num(t.leads), title === 'Meta Ads' ? 'Meta lead forms' : 'Google Ads conversions',
+        'accent', d(t.leads, p?.leads), p ? num(p.leads) : null, pl)}
+      ${stat('Qualified', hasQuality ? num(t.qualified) : '—',
+        hasQuality ? `${dec(t.qualifyRate, 0)}% of leads` : 'not tracked', 'accent',
+        hasQuality ? d(t.qualified, p?.qualified) : '',
+        p && hasQuality ? num(p.qualified) : null, pl)}
+      ${stat('Closed', hasQuality ? num(t.closed) : '—',
+        hasQuality ? `${dec(t.closeRate, 0)}% of qualified` : 'not tracked', 'win',
+        hasQuality ? d(t.closed, p?.closed) : '',
+        p && hasQuality ? num(p.closed) : null, pl)}
+      ${stat('Cost per closure', hasQuality && t.closed ? inr(t.cpClosure) : '—', '', '',
+        hasQuality && t.closed ? d(t.cpClosure, p?.cpClosure, true) : '',
+        p && hasQuality && p.closed ? inr(p.cpClosure) : null, pl)}
     </div>
+
+    <details class="more">
+      <summary>See more</summary>
+      <div class="stats">
+        ${stat('Impressions', num(t.impressions), '', '', d(t.impressions, p?.impressions),
+          p ? num(p.impressions) : null, pl)}
+        ${stat('Clicks', num(t.clicks), `${dec(t.ctr)}% CTR`, '', d(t.clicks, p?.clicks),
+          p ? num(p.clicks) : null, pl)}
+        ${stat('Cost per lead', t.leads ? inr(t.cpl) : '—', '', '',
+          t.leads ? d(t.cpl, p?.cpl, true) : '', p && p.leads ? inr(p.cpl) : null, pl)}
+        ${stat('Cost per qualified lead', hasQuality && t.qualified ? inr(t.cpql) : '—', '', '',
+          hasQuality && t.qualified ? d(t.cpql, p?.cpql, true) : '',
+          p && hasQuality && p.qualified ? inr(p.cpql) : null, pl)}
+        ${stat('Not qualified', hasQuality ? num(t.disqualified) : '—',
+          hasQuality ? `${dec((t.disqualified / (t.crmTotal || 1)) * 100, 0)}% of CRM leads` : 'not tracked',
+          '', hasQuality ? d(t.disqualified, p?.disqualified, true) : '',
+          p && hasQuality ? num(p.disqualified) : null, pl)}
+      </div>
+    </details>
 
     ${t.hasCrm ? statusStrip(t) : ''}
 
@@ -977,6 +1013,9 @@ function clientBlock(client, { internal = false } = {}) {
     closed: (pm?.closed || 0) + (pg?.closed || 0),
   } : null;
   const vs = client.previous ? `vs ${fmtDay(client.previous.since)} – ${fmtDay(client.previous.until)}` : '';
+  const pLabel = client.previous
+    ? (client.previous.days === 1 ? 'day before' : `prev ${client.previous.days} days`)
+    : '';
   const d = (cur, prev, lowerIsBetter = false) => prior ? deltaPill(cur, prev, { lowerIsBetter, title: vs }) : '';
   const cp = (spend, n) => (n ? spend / n : 0);
 
@@ -987,20 +1026,27 @@ function clientBlock(client, { internal = false } = {}) {
       ${goalBanner(client.goals)}
       ${compareLine(client.previous, priorBroke)}
       <div class="headline">
-        ${stat('Ad spend', inr(spend), '', '', d(spend, prior?.spend, true))}
-        ${stat('Leads', num(leadCount), leadCount ? `${inr(spend / leadCount)} per lead` : '', 'accent', d(leadCount, prior?.leads))}
+        ${stat('Ad spend', inr(spend), '', '', d(spend, prior?.spend, true),
+          prior ? inr(prior.spend) : null, pLabel)}
+        ${stat('Leads', num(leadCount), leadCount ? `${inr(spend / leadCount)} per lead` : '', 'accent',
+          d(leadCount, prior?.leads), prior ? num(prior.leads) : null, pLabel)}
         ${stat('Qualified', hasQuality ? num(qualified) : '—',
           hasQuality
             ? (qualified ? `${inr(spend / qualified)} per qualified lead` : 'none yet in this period')
-            : 'not tracked', 'accent', hasQuality ? d(qualified, prior?.qualified) : '')}
+            : 'not tracked', 'accent', hasQuality ? d(qualified, prior?.qualified) : '',
+          prior && hasQuality ? num(prior.qualified) : null, pLabel)}
         ${stat('Closed', hasQuality ? num(closed) : '—',
           hasQuality
             ? (closed ? `${inr(spend / closed)} per closure` : 'none yet in this period')
-            : 'not tracked', 'win', hasQuality ? d(closed, prior?.closed) : '')}
+            : 'not tracked', 'win', hasQuality ? d(closed, prior?.closed) : '',
+          prior && hasQuality ? num(prior.closed) : null, pLabel)}
+        ${stat('Cost per closure', hasQuality && closed ? inr(spend / closed) : '—', '', '',
+          hasQuality && closed ? d(cp(spend, closed), cp(prior?.spend, prior?.closed), true) : '',
+          prior && hasQuality && prior.closed ? inr(cp(prior.spend, prior.closed)) : null, pLabel)}
       </div>
     </header>
-    ${channelBlock('Meta Ads', client.meta, { hasQuality, daily: client.metaDaily, prior: pm, vs })}
-    ${channelBlock('Google Ads', client.googleAds, { hasQuality, daily: client.googleDaily, prior: pg, vs })}
+    ${channelBlock('Meta Ads', client.meta, { hasQuality, daily: client.metaDaily, prior: pm, vs, prevLabel: pLabel })}
+    ${channelBlock('Google Ads', client.googleAds, { hasQuality, daily: client.googleDaily, prior: pg, vs, prevLabel: pLabel })}
     ${crmErrorBlock(client.crmErrors)}
     ${leadsBlock(client.leads)}
     ${overallTrendBlock(client.metaDaily, client.googleDaily)}
@@ -1079,8 +1125,8 @@ export function renderReport({ clients, since, until, generatedAt, internal = fa
   .goal-note { font-size:12px; color:var(--muted); }
 
   .headline, .stats { display:grid; gap:10px; }
-  .headline { grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); }
-  .stats { grid-template-columns:repeat(auto-fit,minmax(132px,1fr)); margin-bottom:14px; }
+  .headline { grid-template-columns:repeat(auto-fit,minmax(196px,1fr)); }
+  .stats { grid-template-columns:repeat(auto-fit,minmax(184px,1fr)); margin-bottom:14px; }
   .stat { background:var(--soft); border:1px solid var(--line); border-radius:11px;
     padding:12px 13px; }
   .stat-label { display:block; font-size:11.5px; color:var(--muted);
@@ -1088,6 +1134,30 @@ export function renderReport({ clients, since, until, generatedAt, internal = fa
   .stat-value { display:block; font-size:21px; font-weight:650; margin-top:3px;
     letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
   .stat-sub { display:block; font-size:12px; color:var(--muted); margin-top:1px; }
+
+  /* previous → current */
+  .stat-pair { display:flex; align-items:baseline; gap:6px; flex-wrap:nowrap;
+    margin-top:3px; white-space:nowrap; }
+  .stat-pair .stat-value { margin-top:0; font-size:20px; }
+  .stat-prev { font-size:15px; font-weight:600; color:var(--muted); }
+  .stat-arrow { font-size:12px; color:var(--muted); opacity:.65; }
+  .stat-scale { display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+    font-size:10.5px; letter-spacing:.02em; text-transform:uppercase;
+    color:var(--muted); opacity:.8; margin-top:3px; }
+  .stat-scale .delta { margin-left:0; text-transform:none; letter-spacing:0; }
+
+  /* See more */
+  .more { margin:14px 0 0; }
+  .more > summary { cursor:pointer; font-size:12.5px; font-weight:600; color:var(--navy);
+    list-style:none; display:inline-flex; align-items:center; gap:6px;
+    padding:6px 12px; border:1px solid var(--line); border-radius:999px;
+    background:var(--soft); }
+  .more > summary::-webkit-details-marker { display:none; }
+  .more > summary::after { content:'▾'; font-size:11px; }
+  .more[open] > summary::after { content:'▴'; }
+  .more > summary:hover { border-color:var(--navy); }
+  .more .stats { margin-top:12px; }
+  @media print { .more { display:block; } .more > summary { display:none; } }
   .delta { display:inline-block; margin-left:7px; padding:1px 7px; border-radius:999px;
     font-size:11.5px; font-weight:650; vertical-align:middle; letter-spacing:.01em; }
   .delta.good { color:#0b6b3a; background:rgba(11,107,58,.10); }
