@@ -423,25 +423,32 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
   let scopeNote = null;
   let rows = data.rows || [];
 
+  // Zero matching rows is a real answer, not a failure. A campaign launched today has
+  // produced no leads yet, and that is indistinguishable from a wrong tab by row count
+  // alone — so refusing on an empty match blocked exactly the ordinary case of adding
+  // a new campaign to a sheet it already shares with its siblings.
+  let noRowsYet = false;
+
   if (mapping.campaignId && campaignIdKey) {
     // Meta writes the id as "c:120249481815510660" in some exports and bare in others.
     const want = String(mapping.campaignId);
-    const hit = rows.filter((r) => String(r[campaignIdKey] || '').replace(/^c:/, '') === want);
-    if (hit.length) {
-      rows = hit;
-      scopeNote = `campaign_id ${want}`;
-    } else if (new Set(rows.map((r) => r[campaignIdKey])).size > 1) {
-      // The tab holds several campaigns and none of them is this one: counting all of
-      // them would be worse than saying so.
-      return {
-        error: `That tab holds leads for other campaigns, and none for campaign ${want}. `
-          + 'Check it is the right tab.',
-      };
-    }
+    // Scope unconditionally. Falling through to every row when nothing matched would
+    // hand this campaign another campaign's leads, which is worse than reporting zero.
+    rows = rows.filter((r) => String(r[campaignIdKey] || '').replace(/^c:/, '') === want);
+    scopeNote = `campaign_id ${want}`;
+    noRowsYet = rows.length === 0;
   } else if (mapping.campaignName && campaignNameKey) {
     const want = String(mapping.campaignName).trim().toLowerCase();
-    const hit = rows.filter((r) => String(r[campaignNameKey] || '').trim().toLowerCase() === want);
-    if (hit.length) { rows = hit; scopeNote = `campaign_name "${mapping.campaignName}"`; }
+    rows = rows.filter((r) => String(r[campaignNameKey] || '').trim().toLowerCase() === want);
+    scopeNote = `campaign_name "${mapping.campaignName}"`;
+    noRowsYet = rows.length === 0;
+  } else if (campaignIdKey && new Set((data.rows || []).map((r) => r[campaignIdKey])).size > 1) {
+    // No id to scope by, but the tab serves several campaigns: every one of them would
+    // be counted against this campaign. That one still has to be refused.
+    return {
+      error: 'That tab holds leads for several campaigns, but this campaign has no id to '
+        + 'match on, so its leads cannot be separated out.',
+    };
   }
 
   // The CSV export cannot filter by date server-side, so the window is applied here.
@@ -473,6 +480,7 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
     statusColumn: statusKey,
     dateColumn: dateKey,
     scopeNote,
+    noRowsYet,
     undated,
     headerRow: data.headerRow ?? 0,
     tabTotal: (data.rows || []).length,

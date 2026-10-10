@@ -605,9 +605,15 @@ const server = http.createServer(async (req, res) => {
 
       mapping.tabName = probe.tab || null;
       saveMapping(key, mapping);
+      // A campaign with no rows yet saves fine, but says so — otherwise "0 leads" is
+      // indistinguishable from a link that silently reads nothing.
+      const noRows = probe.noRowsYet
+        ? `No leads for this campaign in that tab yet. Expected for a campaign that has `
+          + `just launched \u2014 numbers will appear as leads come in.`
+        : null;
       return json(res, 200, {
         ok: true,
-        warning: tabMismatch(campaignName, probe.tab),
+        warning: noRows || tabMismatch(campaignName, probe.tab),
         via: probe.via,
         tab: probe.tab,
         statusColumn: probe.statusColumn,
