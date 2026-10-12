@@ -192,6 +192,29 @@ function gridToObjects(values) {
 }
 
 const STATUS_HEADERS = ['lead_status', 'status', 'lead status', 'crm status', 'stage'];
+
+// Google's auto-tagging puts the campaign id in the landing page's query string as
+// gad_campaignid, so a sheet that records the page URL carries it even when the
+// campaign_id column is empty — which is what happens when a campaign's tracking
+// template is missing the {campaignid} ValueTrack. Reading it back from the URL
+// recovers those leads instead of reporting the campaign as having none.
+const URL_HEADERS = ['page url', 'page_url', 'landing page', 'landing_page', 'url', 'referrer'];
+
+function urlColumnOf(columns) {
+  const lower = columns.map((c) => String(c).trim().toLowerCase());
+  for (const want of URL_HEADERS) {
+    const i = lower.indexOf(want);
+    if (i > -1) return columns[i];
+  }
+  return null;
+}
+
+export function campaignIdFromUrl(url) {
+  const text = String(url || '');
+  if (!text) return null;
+  const hit = text.match(/[?&](?:gad_campaignid|campaignid|campaign_id|utm_campaign)=(\d{5,})/i);
+  return hit ? hit[1] : null;
+}
 const DATE_HEADERS = ['created_time', 'timestamp', 'date', 'created', 'lead_date', 'submitted'];
 
 // Dates in a sheet maintained by hand are not all ISO. A single stray row written
@@ -453,12 +476,25 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
   // a new campaign to a sheet it already shares with its siblings.
   let noRowsYet = false;
 
-  if (mapping.campaignId && campaignIdKey) {
+  const urlKey = urlColumnOf(columns);
+  let fromUrl = 0;
+
+  if (mapping.campaignId && (campaignIdKey || urlKey)) {
     // Meta writes the id as "c:120249481815510660" in some exports and bare in others.
     const want = String(mapping.campaignId);
+    const idOf = (r) => {
+      const cell = campaignIdKey ? String(r[campaignIdKey] || '').replace(/^c:/, '').trim() : '';
+      if (cell) return cell;
+      return urlKey ? campaignIdFromUrl(r[urlKey]) : null;
+    };
     // Scope unconditionally. Falling through to every row when nothing matched would
     // hand this campaign another campaign's leads, which is worse than reporting zero.
-    rows = rows.filter((r) => String(r[campaignIdKey] || '').replace(/^c:/, '') === want);
+    rows = rows.filter((r) => {
+      if (idOf(r) !== want) return false;
+      const cell = campaignIdKey ? String(r[campaignIdKey] || '').trim() : '';
+      if (!cell) fromUrl += 1;
+      return true;
+    });
     scopeNote = `campaign_id ${want}`;
     noRowsYet = rows.length === 0;
   } else if (mapping.campaignName && campaignNameKey) {
@@ -477,8 +513,11 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
 
   // The CSV export cannot filter by date server-side, so the window is applied here.
   const dateKey = dateColumnOf(columns, mapping.dateColumn);
-  // The column's own decidable rows settle its day/month order for the rest.
-  const dateOrder = dateKey ? detectDateOrder(rows.map((r) => r[dateKey])) : null;
+  // Order is detected across the WHOLE tab, not the campaign's own rows. One campaign's
+  // slice can be entirely ambiguous — a week of October dates are all "10/x/2026" — and
+  // detecting on that subset finds no evidence, marks every row undated, and drops the
+  // lot. The evidence lives in the sibling rows.
+  const dateOrder = dateKey ? detectDateOrder((data.rows || []).map((r) => r[dateKey])) : null;
 
   let undated = 0;
   const noDateColumn = !dateKey;
@@ -510,6 +549,7 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
     statusColumn: statusKey,
     dateColumn: dateKey,
     scopeNote,
+    matchedFromUrl: fromUrl,
     noRowsYet,
     undated,
     noDateColumn,
