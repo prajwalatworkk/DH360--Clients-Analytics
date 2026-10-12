@@ -19,9 +19,17 @@ test('not qualified is tested before qualified, so it cannot land in Qualified',
   assert.equal(stageFor('not_qualified'), 'Not qualified');
 });
 
-test('an unrecognised status goes to Unmapped rather than a stage it was not meant for', () => {
-  assert.equal(stageFor('REPEATED'), UNMAPPED);
-  assert.equal(stageFor('CANCELLED'), UNMAPPED);
+test('a repeat, a cancellation and an untouched lead get stages of their own', () => {
+  // None of these is folded into an existing stage: a repeat enquiry is not junk, a
+  // cancellation is not a closure, and an untouched lead is not a judgement.
+  assert.equal(stageFor('REPEATED'), 'Repeated');
+  assert.equal(stageFor('CANCELLED'), 'Cancelled');
+  assert.equal(stageFor('new_enquiry'), 'New enquiry');
+  assert.equal(stageFor('CREATED'), 'New enquiry');
+});
+
+test('a status nobody has mapped still goes to Unmapped, never to a guessed stage', () => {
+  assert.equal(stageFor('awaiting deposit'), UNMAPPED);
   assert.equal(stageFor(''), UNMAPPED);
 });
 
@@ -93,8 +101,8 @@ test('a tab with no date column warns instead of silently using every row', asyn
 test('unmapped statuses are reported with their raw spellings', async () => {
   const restore = stub([
     ['created_time', 'campaign_id', 'lead_status'],
-    ['2026-10-06T10:00:00', '111', 'REPEATED'],
-    ['2026-10-07T10:00:00', '111', 'CANCELLED'],
+    ['2026-10-06T10:00:00', '111', 'awaiting deposit'],
+    ['2026-10-07T10:00:00', '111', 'site visit booked'],
     ['2026-10-08T10:00:00', '111', 'closed'],
   ]);
   const t = await fetchCampaignSheet(
@@ -105,7 +113,27 @@ test('unmapped statuses are reported with their raw spellings', async () => {
   restore();
   assert.equal(t.unmapped, 2);
   assert.equal(t.closed, 1);
-  assert.deepEqual(t.unmappedValues, { REPEATED: 1, CANCELLED: 1 });
+  assert.deepEqual(t.unmappedValues, { 'awaiting deposit': 1, 'site visit booked': 1 });
+});
+
+test('repeats and cancellations are counted as their own stages, not as closures', async () => {
+  const restore = stub([
+    ['created_time', 'campaign_id', 'lead_status'],
+    ['2026-10-06T10:00:00', '111', 'REPEATED'],
+    ['2026-10-07T10:00:00', '111', 'CANCELLED'],
+    ['2026-10-08T10:00:00', '111', 'closed'],
+  ]);
+  const t = await fetchCampaignSheet(
+    { ssId: 'X', gid: '1', campaignId: '111' },
+    'https://script.google.com/x/exec',
+    { since: '2026-10-05', until: '2026-10-11' },
+  );
+  restore();
+  assert.equal(t.closed, 1, 'a cancellation must not inflate closures');
+  assert.equal(t.repeated, 1);
+  assert.equal(t.cancelled, 1);
+  assert.equal(t.unmapped, 0);
+  assert.equal(t.total, 3);
 });
 
 test('a campaign with no rows yet reports zero rather than another campaign\'s leads', async () => {

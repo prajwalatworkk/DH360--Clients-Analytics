@@ -162,9 +162,13 @@ const STAGE_TONE = {
   'No response': 'stage-noresponse',
   'In progress': 'stage-inprogress',
   Closed: 'stage-closed',
+  'New enquiry': 'stage-new',
+  Repeated: 'stage-repeated',
+  Cancelled: 'stage-cancelled',
   Unmapped: 'stage-unmapped',
 };
-const STAGE_ORDER = ['Closed', 'Qualified', 'In progress', 'No response', 'Not qualified', 'Junk', 'Unmapped'];
+const STAGE_ORDER = ['Closed', 'Qualified', 'In progress', 'New enquiry', 'No response',
+  'Not qualified', 'Repeated', 'Cancelled', 'Junk', 'Unmapped'];
 
 // A campaign whose CRM tab could not be read must say so. Silently falling back to
 // the platform's own numbers is how a report ends up disagreeing with the sheet.
@@ -736,7 +740,6 @@ function channelBlock(title, data, opts = {}) {
   return `<section class="channel">
     <h3>${esc(title)}</h3>
     <div class="stats">
-      ${stat('Spend', inr(t.spend), '', '', d('spend', t.spend, p?.spend), p ? inr(p.spend) : null, pl)}
       ${stat('Leads', num(t.leads), title === 'Meta Ads' ? 'Meta lead forms' : 'Google Ads conversions',
         'accent', d('leads', t.leads, p?.leads), p ? num(p.leads) : null, pl)}
       ${stat('Qualified', hasQuality ? num(t.qualified) : '—',
@@ -747,14 +750,15 @@ function channelBlock(title, data, opts = {}) {
         hasQuality ? `${dec((t.closed / (t.crmTotal || 1)) * 100, 0)}% of ${num(t.crmTotal)} CRM leads` : 'not tracked', 'win',
         hasQuality ? d('closed', t.closed, p?.closed) : '',
         p && hasQuality ? num(p.closed) : null, pl)}
-      ${stat('Cost per closure', hasQuality && t.closed ? inr(t.cpClosure) : '—', '', '',
-        hasQuality && t.closed ? d('costPerClosure', t.cpClosure, p?.cpClosure) : '',
-        p && hasQuality && p.closed ? inr(p.cpClosure) : null, pl)}
     </div>
 
     <details class="more">
       <summary>See more</summary>
       <div class="stats">
+        ${stat('Spend', inr(t.spend), '', '', d('spend', t.spend, p?.spend), p ? inr(p.spend) : null, pl)}
+        ${stat('Cost per closure', hasQuality && t.closed ? inr(t.cpClosure) : '—', '', '',
+          hasQuality && t.closed ? d('costPerClosure', t.cpClosure, p?.cpClosure) : '',
+          p && hasQuality && p.closed ? inr(p.cpClosure) : null, pl)}
         ${stat('Impressions', num(t.impressions), '', '', d('impressions', t.impressions, p?.impressions),
           p ? num(p.impressions) : null, pl)}
         ${stat('Clicks', num(t.clicks), `${dec(t.ctr)}% CTR`, '', d('clicks', t.clicks, p?.clicks),
@@ -1042,8 +1046,6 @@ function clientBlock(client, { internal = false } = {}) {
       ${goalBanner(client.goals)}
       ${compareLine(client.previous, priorBroke, client.range)}
       ${channelCount < 2 ? '' : `<div class="headline">
-        ${stat('Ad spend', inr(spend), '', '', d('spend', spend, prior?.spend),
-          prior ? inr(prior.spend) : null, pLabel)}
         ${stat('Leads', num(leadCount), leadCount ? `${inr(spend / leadCount)} per lead` : '', 'accent',
           d('leads', leadCount, prior?.leads), prior ? num(prior.leads) : null, pLabel)}
         ${stat('Qualified', hasQuality ? num(qualified) : '—',
@@ -1056,9 +1058,6 @@ function clientBlock(client, { internal = false } = {}) {
             ? (closed ? `${inr(spend / closed)} per closure` : 'none yet in this period')
             : 'not tracked', 'win', hasQuality ? d('closed', closed, prior?.closed) : '',
           prior && hasQuality ? num(prior.closed) : null, pLabel)}
-        ${stat('Cost per closure', hasQuality && closed ? inr(spend / closed) : '—', '', '',
-          hasQuality && closed ? d('costPerClosure', cp(spend, closed), cp(prior?.spend, prior?.closed)) : '',
-          prior && hasQuality && prior.closed ? inr(cp(prior.spend, prior.closed)) : null, pLabel)}
       </div>`}
     </header>
     ${channelBlock('Meta Ads', client.meta, { hasQuality, daily: client.metaDaily, prior: pm, vs, prevLabel: pLabel })}
@@ -1289,6 +1288,9 @@ export function renderReport({ clients, since, until, generatedAt, internal = fa
   .stage-noresponse { background:#9aa6c2; }
   .stage-notqualified { background:#c9d0e0; }
   .stage-junk { background:var(--red); }
+  .stage-new { background:#5dcaa5; }
+  .stage-repeated { background:#8a93ab; }
+  .stage-cancelled { background:#b07d2a; }
   .stage-unmapped { background:#6b3fa0; }
   .status-legend { display:flex; flex-wrap:wrap; gap:6px 16px; font-size:12.5px; }
   .legend-item { display:inline-flex; align-items:center; gap:5px; }

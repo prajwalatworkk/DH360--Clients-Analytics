@@ -108,10 +108,20 @@ export const mappingKey = (platform, accountId, campaignId) =>
 // Matching is case- and separator-insensitive, so "No_Response", "no response" and
 // "NO RESPONSE" are one thing. Order matters: "not qualified" must be tested before
 // "qualified" or it lands in the wrong stage and doubles the qualified count.
-export const STAGES = ['Qualified', 'Not qualified', 'Junk', 'No response', 'In progress', 'Closed'];
+export const STAGES = [
+  'Qualified', 'Not qualified', 'Junk', 'No response', 'In progress', 'Closed',
+  'New enquiry', 'Repeated', 'Cancelled',
+];
 export const UNMAPPED = 'Unmapped';
 
 const STAGE_RULES = [
+  // These three are stages of their own rather than being folded into an existing one.
+  // A repeat enquiry is not junk, a cancellation is not a closure, and a lead nobody
+  // has touched is not a judgement — putting any of them inside qualified, closed or
+  // junk would move numbers the team never meant to move.
+  ['New enquiry', /^(new.?enquiry|new.?inquiry|new.?lead|new|fresh|untouched|not.?contacted|pending|created)$/],
+  ['Repeated', /^(repeated|repeat|duplicate|dupe|already.?enquired)$/],
+  ['Cancelled', /^(cancelled|canceled|cancellation|dropped|withdrawn)$/],
   ['Closed', /^(closed|closed.?won|won|converted|sale|sold|customer|hired|booked)$/],
   ['Not qualified', /^(not.?qualified|unqualified|disqualified|not.?interested|lost|not.?eligible)$/],
   ['Junk', /^(junk|spam|invalid|fake|test|wrong.?number)$/],
@@ -530,7 +540,8 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
 
   const tally = {
     total: 0, qualified: 0, notQualified: 0, closed: 0,
-    junk: 0, noResponse: 0, inProgress: 0, unmapped: 0,
+    junk: 0, noResponse: 0, inProgress: 0,
+    newEnquiry: 0, repeated: 0, cancelled: 0, unmapped: 0,
   };
   const FIELD = {
     Qualified: 'qualified',
@@ -539,6 +550,9 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
     'No response': 'noResponse',
     'In progress': 'inProgress',
     Closed: 'closed',
+    'New enquiry': 'newEnquiry',
+    Repeated: 'repeated',
+    Cancelled: 'cancelled',
     [UNMAPPED]: 'unmapped',
   };
 
