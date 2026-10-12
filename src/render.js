@@ -197,6 +197,12 @@ function statusStrip(t) {
         })
         .join('')}
     </div>
+    ${t.crmNoDateColumn
+      ? `<p class="crm-note warn">That CRM tab has no date column, so these outcomes are NOT limited to the report's date range \u2014 they cover the whole tab.</p>`
+      : ''}
+    ${t.crmUndated
+      ? `<p class="crm-note">${num(t.crmUndated)} CRM row${t.crmUndated > 1 ? 's' : ''} had an unreadable date and ${t.crmUndated > 1 ? 'were' : 'was'} left out of this period.</p>`
+      : ''}
     <div class="status-legend">
       ${entries
         .map(([status, n]) => {
@@ -1165,6 +1171,8 @@ export function renderReport({ clients, since, until, generatedAt, internal = fa
   .delta.flat { color:var(--muted); background:var(--soft); border:1px solid var(--line); }
   .compare-line { font-size:12.5px; color:var(--muted); margin:6px 0 0; }
   .compare-line.warn-line { color:var(--red); font-weight:600; }
+  .crm-note { margin:8px 0 0; font-size:12px; color:var(--muted); }
+  .crm-note.warn { color:var(--red); font-weight:600; }
   @media print { .delta { border:1px solid currentColor; background:none; } }
   .stat.accent { border-color:color-mix(in srgb, var(--navy) 35%, var(--line)); }
   .stat.accent .stat-value { color:var(--navy); }

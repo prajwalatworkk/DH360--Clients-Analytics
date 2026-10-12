@@ -199,13 +199,14 @@ export function totalsOf(campaigns) {
       unreached: add(acc.unreached, c.unreached),
       inProgress: add(acc.inProgress, c.inProgress),
       newEnquiry: add(acc.newEnquiry, c.newEnquiry),
+      crmUndated: add(acc.crmUndated, c.crmUndated),
       otherStatus: add(acc.otherStatus, c.otherStatus),
       crmTotal: add(acc.crmTotal, c.crmTotal),
     }),
     {
       spend: 0, impressions: 0, clicks: 0, leads: 0, pixelLeads: 0, messaging: 0,
       qualified: 0, closed: 0, junk: 0, disqualified: 0, unreached: 0,
-      inProgress: 0, newEnquiry: 0, otherStatus: 0, crmTotal: 0,
+      inProgress: 0, newEnquiry: 0, otherStatus: 0, crmUndated: 0, crmTotal: 0,
     },
   );
   t.hasCrm = campaigns.some((c) => c.hasCrm);
@@ -213,6 +214,7 @@ export function totalsOf(campaigns) {
   // Naming the tabs on the report itself is the only place a wrong link becomes
   // visible — the numbers it produces look entirely plausible on their own.
   t.crmTabs = [...new Set(campaigns.map((c) => c.crmTab).filter(Boolean))];
+  t.crmNoDateColumn = campaigns.some((c) => c.crmNoDateColumn);
   // Whether quality is *known* for this channel, as opposed to being zero. A real
   // zero ("nothing closed yet") must not read as "no data", or a fallback source
   // gets substituted for it and reports a number that belongs to something else.

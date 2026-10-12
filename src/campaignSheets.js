@@ -197,7 +197,7 @@ const DATE_HEADERS = ['created_time', 'timestamp', 'date', 'created', 'lead_date
 // Dates in a sheet maintained by hand are not all ISO. A single stray row written
 // as "8/28//2026" was being read as undated, which meant it counted inside every
 // range — one extra closure in a September report for a lead from August.
-export function isoDate(value) {
+export function isoDate(value, order = null) {
   const text = String(value ?? '').trim();
   if (!text) return null;
 
@@ -219,16 +219,40 @@ export function isoDate(value) {
   else return null;
   if (year < 2000 || year > 2100) return null;
 
-  // Which of the two is the month. Only decidable when one of them cannot be one;
-  // a genuinely ambiguous pair like 5/6/2026 is left unparsed rather than guessed.
+  // Which of the two is the month. Decidable on its own only when one of them cannot
+  // be one. For a genuinely ambiguous pair like 10/12/2026 the caller supplies the
+  // column's order, worked out from the rows in that same column that ARE decidable.
   let month;
   let day;
   if (first > 12 && second <= 12) { day = first; month = second; }
   else if (second > 12 && first <= 12) { month = first; day = second; }
+  else if (order === 'mdy') { month = first; day = second; }
+  else if (order === 'dmy') { day = first; month = second; }
   else return null;
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
 
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+// A column written by one system keeps one order, so the rows that are unambiguous
+// settle the ones that are not: a single "8/28/2026" proves the column is month-first,
+// which then reads "10/12/2026" as 12 October rather than leaving it undated.
+export function detectDateOrder(values) {
+  let mdy = 0;
+  let dmy = 0;
+  for (const v of values) {
+    const text = String(v ?? '').trim();
+    if (!text || /^\d{4}-\d{2}-\d{2}/.test(text)) continue;
+    const parts = text.split(/[^0-9]+/).filter(Boolean);
+    if (parts.length < 3) continue;
+    const [a, b] = parts.map(Number);
+    if (String(parts[0]).length === 4) continue;
+    if (a > 12 && b <= 12) dmy += 1;
+    else if (b > 12 && a <= 12) mdy += 1;
+  }
+  if (mdy && !dmy) return 'mdy';
+  if (dmy && !mdy) return 'dmy';
+  return null;
 }
 
 function dateColumnOf(columns, preferred) {
@@ -453,14 +477,20 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
 
   // The CSV export cannot filter by date server-side, so the window is applied here.
   const dateKey = dateColumnOf(columns, mapping.dateColumn);
+  // The column's own decidable rows settle its day/month order for the rest.
+  const dateOrder = dateKey ? detectDateOrder(rows.map((r) => r[dateKey])) : null;
+
   let undated = 0;
+  const noDateColumn = !dateKey;
   const inRange = (row) => {
     if (!dateKey) return true;
-    const iso = isoDate(row[dateKey]);
-    // A row whose date cannot be read is still a lead, so it is kept rather than
-    // silently dropped — but it is counted, because a row that lands in every date
-    // range is worth knowing about.
-    if (!iso) { undated += 1; return true; }
+    const iso = isoDate(row[dateKey], dateOrder);
+    // A row whose date cannot be read is EXCLUDED, not kept. Keeping it put it inside
+    // every window at once: when this sheet's writer switched to "10/12/2026" and the
+    // parser stopped reading it, a 7-day report quietly showed all-time closures —
+    // 69 against a true 21. A row that cannot be placed in time cannot honestly be
+    // counted in a period, so it is dropped and reported instead.
+    if (!iso) { undated += 1; return false; }
     return iso >= since && iso <= until;
   };
 
@@ -482,6 +512,7 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
     scopeNote,
     noRowsYet,
     undated,
+    noDateColumn,
     headerRow: data.headerRow ?? 0,
     tabTotal: (data.rows || []).length,
     tab: data.tab || mapping.tabName || null,
