@@ -691,6 +691,19 @@ const CHART_SCRIPT = `<script>
 })();
 </script>`;
 
+// Spelled out on the campaign row itself, because that is where someone checking a
+// figure against their own filter is looking. The qualified count is per CAMPAIGN —
+// a person can click a pet-sitting ad and ask about boarding — and without the split
+// printed here the number looks wrong to anyone who filtered the sheet by service.
+function crmBasis(c) {
+  const parts = [`CRM tab: ${c.crmTab || 'linked'}`];
+  const services = Object.entries(c.crmServices || {}).sort((a, b) => b[1] - a[1]);
+  if (services.length > 1) {
+    parts.push(`counted by campaign \u2014 asked for: ${services.map(([n, v]) => `${n} ${v}`).join(', ')}`);
+  }
+  return esc(parts.join(' \u00b7 '));
+}
+
 function channelBlock(title, data, opts = {}) {
   if (!data) return '';
   if (data.error) {
@@ -720,7 +733,7 @@ function channelBlock(title, data, opts = {}) {
         .map(
           (c) => `<tr>
             <td>${esc(c.name)}${c.parent ? `<span class="parent">${esc(c.parent)}</span>` : ''}${
-              c.crmSource === 'sheet' ? `<span class="parent">CRM tab: ${esc(c.crmTab || 'linked')}</span>` : ''}</td>
+              c.crmSource === 'sheet' ? `<span class="parent">${crmBasis(c)}</span>` : ''}</td>
             <td class="n">${inr(c.spend)}</td>
             <td class="n">${num(c.impressions)}</td>
             <td class="n">${num(c.clicks)}</td>
