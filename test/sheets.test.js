@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  stageFor, UNMAPPED, isoDate, detectDateOrder, campaignIdFromUrl, parseSheetUrl, fetchCampaignSheet,
+  stageFor, UNMAPPED, isoDate, detectDateOrder, campaignIdFromUrl, parseSheetUrl,
+  fetchCampaignSheet, inferService,
 } from '../src/campaignSheets.js';
 
 test('statuses normalize onto fixed stages, case and separator insensitive', () => {
@@ -146,4 +147,39 @@ test('a campaign with no rows yet reports zero rather than another campaign\'s l
   restore();
   assert.equal(t.total, 0);
   assert.equal(t.noRowsYet, true);
+});
+
+test('a campaign counts only the service its name is for', async () => {
+  const restore = stub([
+    ['created_time', 'campaign_id', 'lead_status', 'Service'],
+    ['2026-10-07T10:00:00', '111', 'qualified', 'Pet Sitting'],
+    ['2026-10-08T10:00:00', '111', 'qualified', 'Pet Sitting'],
+    ['2026-10-09T10:00:00', '111', 'qualified', 'Pet Sitting'],
+    ['2026-10-10T10:00:00', '111', 'qualified', 'Pet Boarding'],
+  ]);
+  const t = await fetchCampaignSheet(
+    { ssId: 'X', gid: '1', campaignId: '111', campaignName: 'Search | Pet Sitting | Bangalore' },
+    'https://script.google.com/x/exec',
+    { since: '2026-10-05', until: '2026-10-11' },
+  );
+  restore();
+  assert.equal(t.serviceNote, 'Pet Sitting');
+  assert.equal(t.qualified, 3, 'the Pet Boarding enquiry belongs to a different service');
+  assert.equal(t.total, 3);
+});
+
+test('a campaign whose name names no service still counts everything it brought', async () => {
+  const restore = stub([
+    ['created_time', 'campaign_id', 'lead_status', 'Service'],
+    ['2026-10-07T10:00:00', '111', 'qualified', 'Pet Sitting'],
+    ['2026-10-10T10:00:00', '111', 'qualified', 'Pet Boarding'],
+  ]);
+  const t = await fetchCampaignSheet(
+    { ssId: 'X', gid: '1', campaignId: '111', campaignName: 'PU | Search | Core | BLR' },
+    'https://script.google.com/x/exec',
+    { since: '2026-10-05', until: '2026-10-11' },
+  );
+  restore();
+  assert.equal(t.serviceNote, null, 'narrowing it to nothing would be worse than counting broadly');
+  assert.equal(t.qualified, 2);
 });

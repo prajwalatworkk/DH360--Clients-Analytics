@@ -209,14 +209,16 @@ function statusStrip(t, adLeads = null) {
           unmapped.map(([raw, n]) => `\u201c${esc(raw)}\u201d (${num(n)})`).join(', ')
         }. Tell me which stage each belongs to and they will be counted.</p>`
       : ''}
-    ${Object.keys(t.crmServices || {}).length
-      ? `<p class="crm-note">Counted by the campaign that brought the lead${
-          t.crmFromUrl ? ` (${num(t.crmFromUrl)} matched from the landing page URL)` : ''
-        }. What they asked for: ${Object.entries(t.crmServices)
-          .sort((a, b) => b[1] - a[1])
-          .map(([name, n]) => `${esc(name)} ${num(n)}`)
-          .join(', ')}.</p>`
-      : ''}
+    ${t.crmServiceFilters?.length
+      ? `<p class="crm-note">Counting only leads that asked for ${esc(t.crmServiceFilters.join(' or '))}${
+          t.crmFromUrl ? `, matched to the campaign by the landing page URL` : ''
+        }. Leads this campaign brought that asked for something else are not counted here.</p>`
+      : (Object.keys(t.crmServices || {}).length > 1
+        ? `<p class="crm-note">Counting every service this campaign brought${
+            t.crmFromUrl ? ` (${num(t.crmFromUrl)} matched from the landing page URL)` : ''
+          }: ${Object.entries(t.crmServices).sort((a, b) => b[1] - a[1])
+            .map(([name, n]) => `${esc(name)} ${num(n)}`).join(', ')}.</p>`
+        : '')}
     ${t.crmNoDateColumn
       ? `<p class="crm-note warn">That CRM tab has no date column, so these outcomes are NOT limited to the report's date range \u2014 they cover the whole tab.</p>`
       : ''}
@@ -697,9 +699,13 @@ const CHART_SCRIPT = `<script>
 // printed here the number looks wrong to anyone who filtered the sheet by service.
 function crmBasis(c) {
   const parts = [`CRM tab: ${c.crmTab || 'linked'}`];
-  const services = Object.entries(c.crmServices || {}).sort((a, b) => b[1] - a[1]);
-  if (services.length > 1) {
-    parts.push(`counted by campaign \u2014 asked for: ${services.map(([n, v]) => `${n} ${v}`).join(', ')}`);
+  if (c.crmService) {
+    parts.push(`counting only leads that asked for ${c.crmService}`);
+  } else {
+    const services = Object.entries(c.crmServices || {}).sort((a, b) => b[1] - a[1]);
+    if (services.length > 1) {
+      parts.push(`counting every service this campaign brought: ${services.map(([n, v]) => `${n} ${v}`).join(', ')}`);
+    }
   }
   return esc(parts.join(' \u00b7 '));
 }
@@ -753,10 +759,13 @@ function channelBlock(title, data, opts = {}) {
   return `<section class="channel">
     <h3>${esc(title)}</h3>
     <div class="stats">
-      ${stat('Leads', num(t.leads), title === 'Meta Ads' ? 'Meta lead forms' : 'Google Ads conversions',
+      ${stat('Leads', num(t.leads),
+        t.crmServiceFilters?.length
+          ? `asked for ${t.crmServiceFilters.join(' or ')} \u00b7 ${num(t.adLeads)} ${title === 'Meta Ads' ? 'Meta leads' : 'Google conversions'} in total`
+          : (title === 'Meta Ads' ? 'Meta lead forms' : 'Google Ads conversions'),
         'accent', d('leads', t.leads, p?.leads), p ? num(p.leads) : null, pl)}
       ${stat('Qualified', hasQuality ? num(t.qualified) : '—',
-        hasQuality ? `${dec(t.qualifyRate, 0)}% of ${num(t.leads)} ad leads` : 'not tracked', 'accent',
+        hasQuality ? `${dec(t.qualifyRate, 0)}% of ${num(t.leads)} ${t.crmServiceFilters?.length ? 'matched' : 'ad'} leads` : 'not tracked', 'accent',
         hasQuality ? d('qualified', t.qualified, p?.qualified) : '',
         p && hasQuality ? num(p.qualified) : null, pl)}
       ${stat('Closed', hasQuality ? num(t.closed) : '—',

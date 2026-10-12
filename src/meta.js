@@ -201,13 +201,14 @@ export function totalsOf(campaigns) {
       crmUndated: add(acc.crmUndated, c.crmUndated),
       crmUnmapped: add(acc.crmUnmapped, c.crmUnmapped),
       crmMatched: add(acc.crmMatched, c.crmMatched),
+      adLeads: add(acc.adLeads, c.adLeads ?? c.leads),
       otherStatus: add(acc.otherStatus, c.otherStatus),
       crmTotal: add(acc.crmTotal, c.crmTotal),
     }),
     {
       spend: 0, impressions: 0, clicks: 0, leads: 0, pixelLeads: 0, messaging: 0,
       qualified: 0, closed: 0, junk: 0, disqualified: 0, unreached: 0,
-      inProgress: 0, crmUndated: 0, crmUnmapped: 0, crmMatched: 0, crmTotal: 0,
+      inProgress: 0, crmUndated: 0, crmUnmapped: 0, crmMatched: 0, adLeads: 0, crmTotal: 0,
     },
   );
   t.hasCrm = campaigns.some((c) => c.hasCrm);
@@ -217,6 +218,7 @@ export function totalsOf(campaigns) {
   t.crmTabs = [...new Set(campaigns.map((c) => c.crmTab).filter(Boolean))];
   t.crmNoDateColumn = campaigns.some((c) => c.crmNoDateColumn);
   t.crmFromUrl = campaigns.reduce((n, c) => n + (c.crmFromUrl || 0), 0);
+  t.crmServiceFilters = [...new Set(campaigns.map((c) => c.crmService).filter(Boolean))];
   // Merged across the campaigns in this channel, so the breakdown adds up to the
   // CRM total shown beside it.
   t.crmServices = {};

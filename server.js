@@ -263,7 +263,7 @@ async function buildReport({ accounts, since, until, level, internal = false, li
             row.inProgress = 0; row.crmTotal = 0;
             row.crmMatched = 0;
             row.crmUndated = 0; row.crmNoDateColumn = false;
-            row.crmServices = null; row.crmFromUrl = 0;
+            row.crmServices = null; row.crmFromUrl = 0; row.crmService = null;
             continue;
           }
           first = false;
@@ -277,6 +277,16 @@ async function buildReport({ accounts, since, until, level, internal = false, li
           row.crmUndated = tally.undated;
           row.crmNoDateColumn = tally.noDateColumn;
           row.crmServices = tally.services;
+          row.crmService = tally.serviceNote;
+          // A campaign narrowed to one service cannot use the ad platform's lead
+          // count: the platform has no idea which service the person went on to ask
+          // for, so it counts all of them. Mixing that total with service-filtered
+          // outcomes is what made "10 leads, 3 qualified" read as a mistake. Keep the
+          // platform figure alongside, it is still what the spend bought.
+          if (tally.serviceNote) {
+            row.adLeads = row.leads;
+            row.leads = tally.total;
+          }
           row.crmFromUrl = tally.matchedFromUrl;
           row.crmTotal = tally.total;
           row.stages = tally.stages;

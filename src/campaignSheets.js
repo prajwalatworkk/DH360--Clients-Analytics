@@ -226,6 +226,24 @@ function urlColumnOf(columns) {
   return null;
 }
 
+// Which service a campaign is for, read from its own name against the services the
+// tab actually records. "Search | Pet Sitting | Bangalore | Leads" is for Pet Sitting;
+// a campaign whose name names no service — "PU | Search | Core | BLR" — is for all of
+// them, and must keep counting every lead it brings rather than silently counting none.
+export function inferService(campaignName, serviceValues) {
+  const name = String(campaignName || '').toLowerCase();
+  if (!name) return null;
+  let best = null;
+  for (const raw of serviceValues) {
+    const v = String(raw || '').trim();
+    if (!v || v === '(not stated)') continue;
+    if (!name.includes(v.toLowerCase())) continue;
+    // Longest wins, so "Pet Sitting" is preferred over a bare "Sitting".
+    if (!best || v.length > best.length) best = v;
+  }
+  return best;
+}
+
 export function campaignIdFromUrl(url) {
   const text = String(url || '');
   if (!text) return null;
@@ -519,6 +537,20 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
     };
   }
 
+  // The campaign counts only the leads that asked for its own service. A campaign whose
+  // name names no service keeps counting everything it brought, since narrowing it to
+  // nothing would be worse than counting broadly.
+  let serviceNote = null;
+  if (serviceKey) {
+    const present = [...new Set((data.rows || []).map((r) => String(r[serviceKey] || '').trim()))];
+    const want = mapping.service || inferService(mapping.campaignName, present);
+    if (want) {
+      rows = rows.filter((r) => String(r[serviceKey] || '').trim().toLowerCase() === want.toLowerCase());
+      serviceNote = want;
+      noRowsYet = rows.length === 0;
+    }
+  }
+
   const dateKey = dateColumnOf(columns, mapping.dateColumn);
   // Order is detected across the WHOLE tab, not the campaign's own rows. One campaign's
   // slice can be entirely ambiguous — a week of October dates are all "10/x/2026" — and
@@ -583,6 +615,7 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
     statusColumn: statusKey,
     dateColumn: dateKey,
     scopeNote,
+    serviceNote,
     services,
     matchedFromUrl: fromUrl,
     noRowsYet,
