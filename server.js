@@ -263,6 +263,7 @@ async function buildReport({ accounts, since, until, level, internal = false, li
             row.inProgress = 0; row.crmTotal = 0;
             row.newEnquiry = 0; row.otherStatus = 0;
             row.crmUndated = 0; row.crmNoDateColumn = false;
+            row.crmServices = null; row.crmFromUrl = 0;
             continue;
           }
           first = false;
@@ -276,6 +277,8 @@ async function buildReport({ accounts, since, until, level, internal = false, li
           row.otherStatus = tally.other + tally.blank;
           row.crmUndated = tally.undated;
           row.crmNoDateColumn = tally.noDateColumn;
+          row.crmServices = tally.services;
+          row.crmFromUrl = tally.matchedFromUrl;
           row.crmTotal = tally.total;
           row.statuses = tally.statuses;
           row.sheetLeads = tally.total;

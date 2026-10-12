@@ -197,6 +197,14 @@ function statusStrip(t) {
         })
         .join('')}
     </div>
+    ${Object.keys(t.crmServices || {}).length
+      ? `<p class="crm-note">Counted by the campaign that brought the lead${
+          t.crmFromUrl ? ` (${num(t.crmFromUrl)} matched from the landing page URL)` : ''
+        }. What they asked for: ${Object.entries(t.crmServices)
+          .sort((a, b) => b[1] - a[1])
+          .map(([name, n]) => `${esc(name)} ${num(n)}`)
+          .join(', ')}.</p>`
+      : ''}
     ${t.crmNoDateColumn
       ? `<p class="crm-note warn">That CRM tab has no date column, so these outcomes are NOT limited to the report's date range \u2014 they cover the whole tab.</p>`
       : ''}

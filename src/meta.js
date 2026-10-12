@@ -215,6 +215,15 @@ export function totalsOf(campaigns) {
   // visible — the numbers it produces look entirely plausible on their own.
   t.crmTabs = [...new Set(campaigns.map((c) => c.crmTab).filter(Boolean))];
   t.crmNoDateColumn = campaigns.some((c) => c.crmNoDateColumn);
+  t.crmFromUrl = campaigns.reduce((n, c) => n + (c.crmFromUrl || 0), 0);
+  // Merged across the campaigns in this channel, so the breakdown adds up to the
+  // CRM total shown beside it.
+  t.crmServices = {};
+  for (const c of campaigns) {
+    for (const [name, n] of Object.entries(c.crmServices || {})) {
+      t.crmServices[name] = (t.crmServices[name] || 0) + n;
+    }
+  }
   // Whether quality is *known* for this channel, as opposed to being zero. A real
   // zero ("nothing closed yet") must not read as "no data", or a fallback source
   // gets substituted for it and reports a number that belongs to something else.

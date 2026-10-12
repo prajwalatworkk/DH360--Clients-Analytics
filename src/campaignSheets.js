@@ -462,6 +462,13 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
     junk: 0, noResponse: 0, followUp: 0, other: 0, blank: 0,
   };
   const statuses = {};
+  // What the person actually asked for, which is not the same question as which
+  // campaign brought them: someone can click a pet-sitting ad and book grooming.
+  // Counting by campaign is right for ad reporting, but without this breakdown the
+  // total looks wrong to anyone checking it against a filter on the service column.
+  const serviceKey = columns.find((c) => ['service', 'services', 'enquiry type', 'interested in']
+    .includes(String(c).trim().toLowerCase()));
+  const services = {};
 
   // A general pipeline tab carries several campaigns' leads. Narrow to this one, or
   // the campaign's report shows every campaign that shares the tab.
@@ -537,6 +544,10 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
 
   for (const row of kept) {
     tally.total += 1;
+    if (serviceKey) {
+      const sv = String(row[serviceKey] || '').trim() || '(not stated)';
+      services[sv] = (services[sv] || 0) + 1;
+    }
     const raw = String(row[statusKey] || '').trim();
     tally[bucketFor(raw)] += 1;
     const label = raw || '(blank)';
@@ -549,6 +560,7 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
     statusColumn: statusKey,
     dateColumn: dateKey,
     scopeNote,
+    services,
     matchedFromUrl: fromUrl,
     noRowsYet,
     undated,
