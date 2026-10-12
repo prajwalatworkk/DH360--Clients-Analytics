@@ -9,7 +9,10 @@
     "report": "node index.js",
     "week": "node index.js --days 7",
     "month": "node index.js --days 30",
-    "google:auth": "node scripts/google-oauth-setup.js"
+    "google:auth": "node scripts/google-oauth-setup.js",
+    "test": "node --test \"test/*.test.js\""
   },
-  "engines": { "node": ">=18" }
+  "engines": {
+    "node": ">=18"
+  }
 }

@@ -258,10 +258,10 @@ async function buildReport({ accounts, since, until, level, internal = false, li
           if (row.campaignId !== id) continue;
           if (!first) {
             row.qualified = null; row.closed = null;
-            row.hasCrm = false; row.statuses = {};
+            row.hasCrm = false; row.stages = {}; row.unmappedValues = {}; row.crmUnmapped = 0;
             row.junk = 0; row.disqualified = 0; row.unreached = 0;
             row.inProgress = 0; row.crmTotal = 0;
-            row.newEnquiry = 0; row.otherStatus = 0;
+            row.crmMatched = 0;
             row.crmUndated = 0; row.crmNoDateColumn = false;
             row.crmServices = null; row.crmFromUrl = 0;
             continue;
@@ -272,15 +272,16 @@ async function buildReport({ accounts, since, until, level, internal = false, li
           row.junk = tally.junk;
           row.disqualified = tally.notQualified;
           row.unreached = tally.noResponse;
-          row.inProgress = tally.followUp;
-          row.newEnquiry = tally.newEnquiry;
-          row.otherStatus = tally.other + tally.blank;
+          row.inProgress = tally.inProgress;
+          row.crmMatched = tally.total;
           row.crmUndated = tally.undated;
           row.crmNoDateColumn = tally.noDateColumn;
           row.crmServices = tally.services;
           row.crmFromUrl = tally.matchedFromUrl;
           row.crmTotal = tally.total;
-          row.statuses = tally.statuses;
+          row.stages = tally.stages;
+          row.unmappedValues = tally.unmappedValues;
+          row.crmUnmapped = tally.unmapped;
           row.sheetLeads = tally.total;
           row.hasCrm = true;
           row.crmSource = 'sheet';
@@ -296,7 +297,7 @@ async function buildReport({ accounts, since, until, level, internal = false, li
 
     const client = {
       name: group.name, meta, googleAds, leads: scopedLeads, goals, metaDaily, googleDaily,
-      sources: group.sources, crmErrors,
+      sources: group.sources, crmErrors, range: { since, until },
     };
     client.insights = light ? null : analyse(client);
 

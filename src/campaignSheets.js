@@ -104,23 +104,30 @@ export const mappingKey = (platform, accountId, campaignId) =>
 // The sales team types these by hand, so match forgivingly: case, underscores and
 // extra spaces are all normalised away first. "not qualified" must be tested before
 // "qualified" or it lands in the wrong bucket and doubles the qualified count.
-const BUCKETS = [
-  // A lead nobody has worked yet. Its own bucket rather than "other", so it never
-  // reads as a judgement the team has not actually made.
-  ['newEnquiry', /^(new.?enquiry|new.?inquiry|new.?lead|new|fresh|untouched|not.?contacted|pending|open)$/],
-  ['closed', /^(closed|closed.?won|won|converted|sale|sold|customer|hired|booked)$/],
-  ['notQualified', /^(not.?qualified|unqualified|disqualified|not.?interested|lost|not.?eligible)$/],
-  ['junk', /^(junk|spam|invalid|fake|test|wrong.?number)$/],
-  ['noResponse', /^(no.?response|rnr|not.?reachable|ringing.?no.?response|unreachable|no.?answer)$/],
-  ['followUp', /^(follow.?up|following.?up|callback|call.?back|in.?progress|warm|nurture)$/],
-  ['qualified', /^(qualified|hot|interested|mql|sql|prospect)$/],
+// Raw sheet values, as typed by the sales team, collapsed onto a fixed set of stages.
+// Matching is case- and separator-insensitive, so "No_Response", "no response" and
+// "NO RESPONSE" are one thing. Order matters: "not qualified" must be tested before
+// "qualified" or it lands in the wrong stage and doubles the qualified count.
+export const STAGES = ['Qualified', 'Not qualified', 'Junk', 'No response', 'In progress', 'Closed'];
+export const UNMAPPED = 'Unmapped';
+
+const STAGE_RULES = [
+  ['Closed', /^(closed|closed.?won|won|converted|sale|sold|customer|hired|booked)$/],
+  ['Not qualified', /^(not.?qualified|unqualified|disqualified|not.?interested|lost|not.?eligible)$/],
+  ['Junk', /^(junk|spam|invalid|fake|test|wrong.?number)$/],
+  ['No response', /^(no.?response|rnr|not.?reachable|ringing.?no.?response|unreachable|no.?answer|voicemail)$/],
+  ['In progress', /^(follow.?up|following.?up|callback|call.?back|in.?progress|warm|nurture|share.?the.?details|details.?shared|contacted)$/],
+  ['Qualified', /^(qualified|hot|interested|mql|sql|prospect)$/],
 ];
 
-export function bucketFor(status) {
+// Anything not recognised keeps its raw spelling and is reported, rather than being
+// folded into a stage it was never meant for. A status nobody mapped is a question
+// for the team, not a number to invent.
+export function stageFor(status) {
   const s = String(status || '').trim().toLowerCase().replace(/[_\s]+/g, ' ');
-  if (!s) return 'blank';
-  for (const [name, pattern] of BUCKETS) if (pattern.test(s)) return name;
-  return 'other';
+  if (!s) return UNMAPPED;
+  for (const [stage, pattern] of STAGE_RULES) if (pattern.test(s)) return stage;
+  return UNMAPPED;
 }
 
 // Header names a Meta lead export uses. Used to find the header ROW, which is not
@@ -457,15 +464,8 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
     return { error: `No status column in that tab. Headers: ${columns.slice(0, 8).join(', ')}` };
   }
 
-  const tally = {
-    total: 0, newEnquiry: 0, qualified: 0, notQualified: 0, closed: 0,
-    junk: 0, noResponse: 0, followUp: 0, other: 0, blank: 0,
-  };
-  const statuses = {};
   // What the person actually asked for, which is not the same question as which
   // campaign brought them: someone can click a pet-sitting ad and book grooming.
-  // Counting by campaign is right for ad reporting, but without this breakdown the
-  // total looks wrong to anyone checking it against a filter on the service column.
   const serviceKey = columns.find((c) => ['service', 'services', 'enquiry type', 'interested in']
     .includes(String(c).trim().toLowerCase()));
   const services = {};
@@ -474,20 +474,13 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
   // the campaign's report shows every campaign that shares the tab.
   const campaignIdKey = columns.find((c) => c.trim().toLowerCase() === 'campaign_id');
   const campaignNameKey = columns.find((c) => c.trim().toLowerCase() === 'campaign_name');
+  const urlKey = urlColumnOf(columns);
   let scopeNote = null;
   let rows = data.rows || [];
-
-  // Zero matching rows is a real answer, not a failure. A campaign launched today has
-  // produced no leads yet, and that is indistinguishable from a wrong tab by row count
-  // alone — so refusing on an empty match blocked exactly the ordinary case of adding
-  // a new campaign to a sheet it already shares with its siblings.
   let noRowsYet = false;
-
-  const urlKey = urlColumnOf(columns);
   let fromUrl = 0;
 
   if (mapping.campaignId && (campaignIdKey || urlKey)) {
-    // Meta writes the id as "c:120249481815510660" in some exports and bare in others.
     const want = String(mapping.campaignId);
     const idOf = (r) => {
       const cell = campaignIdKey ? String(r[campaignIdKey] || '').replace(/^c:/, '').trim() : '';
@@ -510,15 +503,12 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
     scopeNote = `campaign_name "${mapping.campaignName}"`;
     noRowsYet = rows.length === 0;
   } else if (campaignIdKey && new Set((data.rows || []).map((r) => r[campaignIdKey])).size > 1) {
-    // No id to scope by, but the tab serves several campaigns: every one of them would
-    // be counted against this campaign. That one still has to be refused.
     return {
       error: 'That tab holds leads for several campaigns, but this campaign has no id to '
         + 'match on, so its leads cannot be separated out.',
     };
   }
 
-  // The CSV export cannot filter by date server-side, so the window is applied here.
   const dateKey = dateColumnOf(columns, mapping.dateColumn);
   // Order is detected across the WHOLE tab, not the campaign's own rows. One campaign's
   // slice can be entirely ambiguous — a week of October dates are all "10/x/2026" — and
@@ -528,19 +518,33 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
 
   let undated = 0;
   const noDateColumn = !dateKey;
-  const inRange = (row) => {
+  const kept = rows.filter((row) => {
     if (!dateKey) return true;
     const iso = isoDate(row[dateKey], dateOrder);
     // A row whose date cannot be read is EXCLUDED, not kept. Keeping it put it inside
-    // every window at once: when this sheet's writer switched to "10/12/2026" and the
-    // parser stopped reading it, a 7-day report quietly showed all-time closures —
-    // 69 against a true 21. A row that cannot be placed in time cannot honestly be
-    // counted in a period, so it is dropped and reported instead.
+    // every window at once, which turned a parse failure into confidently wrong numbers
+    // instead of a visible gap.
     if (!iso) { undated += 1; return false; }
     return iso >= since && iso <= until;
+  });
+
+  const tally = {
+    total: 0, qualified: 0, notQualified: 0, closed: 0,
+    junk: 0, noResponse: 0, inProgress: 0, unmapped: 0,
+  };
+  const FIELD = {
+    Qualified: 'qualified',
+    'Not qualified': 'notQualified',
+    Junk: 'junk',
+    'No response': 'noResponse',
+    'In progress': 'inProgress',
+    Closed: 'closed',
+    [UNMAPPED]: 'unmapped',
   };
 
-  const kept = rows.filter(inRange);
+  const stages = {};
+  // The raw spellings behind Unmapped, so the report can name what nobody has mapped.
+  const unmappedValues = {};
 
   for (const row of kept) {
     tally.total += 1;
@@ -549,14 +553,19 @@ export async function fetchCampaignSheet(mapping, endpoint, { since, until }, ca
       services[sv] = (services[sv] || 0) + 1;
     }
     const raw = String(row[statusKey] || '').trim();
-    tally[bucketFor(raw)] += 1;
-    const label = raw || '(blank)';
-    statuses[label] = (statuses[label] || 0) + 1;
+    const stage = stageFor(raw);
+    tally[FIELD[stage]] += 1;
+    stages[stage] = (stages[stage] || 0) + 1;
+    if (stage === UNMAPPED) {
+      const label = raw || '(blank)';
+      unmappedValues[label] = (unmappedValues[label] || 0) + 1;
+    }
   }
 
   return {
     ...tally,
-    statuses,
+    stages,
+    unmappedValues,
     statusColumn: statusKey,
     dateColumn: dateKey,
     scopeNote,

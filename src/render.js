@@ -1,6 +1,8 @@
 // Renders the fetched data into one self-contained HTML file (no external assets,
 // no local server needed — data and logo are inlined, so file:// works).
 
+import { changeOf } from './metrics.js';
+
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT } from './env.js';
@@ -110,35 +112,25 @@ function stat(label, value, sub, tone = '', delta = '', prev = null, prevLabel =
     ${sub ? `<span class="stat-sub">${esc(sub)}</span>` : ''}</div>`;
 }
 
-// Change against the comparison window, as a small ▲/▼ pill next to the value.
-// `lowerIsBetter` flips the colour for cost metrics, where a drop is the good news.
-// Nothing is drawn when there is no prior window, or both sides are zero — a pill
-// saying "0%" is noise, and "▲ from nothing" is better said as "new".
-function deltaPill(cur, prev, { lowerIsBetter = false, title = '' } = {}) {
-  if (prev == null || cur == null) return '';
-  cur = Number(cur) || 0; prev = Number(prev) || 0;
-  if (!cur && !prev) return '';
-  let text, up;
-  if (!prev) { text = 'new'; up = true; }
-  else {
-    const pct = ((cur - prev) / prev) * 100;
-    if (Math.abs(pct) < 0.5) { text = '0%'; up = null; }
-    else { up = pct > 0; text = `${up ? '▲' : '▼'} ${Math.abs(pct) >= 100 ? Math.round(Math.abs(pct)) : Math.abs(pct).toFixed(Math.abs(pct) < 10 ? 1 : 0)}%`; }
-  }
-  const good = up == null ? null : (lowerIsBetter ? !up : up);
-  const tone = good == null ? 'flat' : good ? 'good' : 'bad';
-  return `<span class="delta ${tone}" title="${esc(title)}">${esc(text)}</span>`;
+// Change against the comparison window, as a small pill next to the value. Direction,
+// colour and whether a percentage is even appropriate all come from the metric itself
+// — see src/metrics.js — rather than from a flag passed at each call site.
+function deltaPill(metric, cur, prev, { title = '' } = {}) {
+  const change = changeOf(metric, cur, prev);
+  if (!change) return '';
+  return `<span class="delta ${change.tone}" title="${esc(title)}">${esc(change.text)}</span>`;
 }
 
 const fmtDay = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 
-function compareLine(previous, broke = false) {
+function compareLine(previous, broke = false, current = null) {
   if (!previous) return '';
+  const now = current ? `${fmtDay(current.since)} \u2013 ${fmtDay(current.until)}` : 'this period';
   const label = previous.days === 1 ? 'the day before' : `the previous ${previous.days} days`;
   if (broke) {
     return `<p class="compare-line warn-line">Could not load ${esc(label)} (${esc(fmtDay(previous.since))} – ${esc(fmtDay(previous.until))}), so no change figures are shown. Refresh to try again.</p>`;
   }
-  return `<p class="compare-line">▲▼ compared with ${esc(label)} · ${esc(fmtDay(previous.since))} – ${esc(fmtDay(previous.until))}</p>`;
+  return `<p class="compare-line">${esc(now)} <strong>vs</strong> ${esc(fmtDay(previous.since))} – ${esc(fmtDay(previous.until))} <span class="muted">(${esc(label)})</span></p>`;
 }
 
 function goalBanner(goals) {
@@ -160,12 +152,19 @@ function goalBanner(goals) {
 const LEVEL_HEADING = { campaign: 'Campaign', adset: 'Ad set', ad: 'Ad' };
 
 // Colour the statuses your team actually uses, so the funnel reads at a glance.
-const STATUS_TONE = [
-  [/^(closed|won|converted|sale|hired)$/, 'tone-closed'],
-  [/^(qualified|hot|interested|mql|sql)$/, 'tone-qualified'],
-  [/^(junk|spam|invalid|not qualified|unqualified|disqualified)$/, 'tone-bad'],
-  [/^(rnr|no response|not reachable)$/, 'tone-cold'],
-];
+// One colour per stage, none shared. The old map keyed off raw spellings, so two
+// spellings of the same outcome could take different colours and two different
+// outcomes could take the same one.
+const STAGE_TONE = {
+  Qualified: 'stage-qualified',
+  'Not qualified': 'stage-notqualified',
+  Junk: 'stage-junk',
+  'No response': 'stage-noresponse',
+  'In progress': 'stage-inprogress',
+  Closed: 'stage-closed',
+  Unmapped: 'stage-unmapped',
+};
+const STAGE_ORDER = ['Closed', 'Qualified', 'In progress', 'No response', 'Not qualified', 'Junk', 'Unmapped'];
 
 // A campaign whose CRM tab could not be read must say so. Silently falling back to
 // the platform's own numbers is how a report ends up disagreeing with the sheet.
@@ -176,27 +175,36 @@ function crmErrorBlock(errors) {
   </section>`;
 }
 
-function statusStrip(t) {
-  const entries = Object.entries(t.statuses || {}).sort((a, b) => b[1] - a[1]);
+function statusStrip(t, adLeads = null) {
+  const entries = STAGE_ORDER
+    .filter((stage) => t.stages?.[stage])
+    .map((stage) => [stage, t.stages[stage]]);
   if (!entries.length) return '';
-  const total = entries.reduce((s, [, n]) => s + n, 0) || 1;
+  const total = entries.reduce((sum, [, n]) => sum + n, 0) || 1;
+  const unmapped = Object.entries(t.unmappedValues || {}).sort((a, b) => b[1] - a[1]);
 
   return `<div class="statuses">
     <div class="statuses-head">
       <span>${t.fromSheet
         ? `Lead outcomes from your CRM sheet${t.crmTabs?.length ? ` \u00b7 ${esc(t.crmTabs.join(', '))}` : ''}`
         : 'Lead outcomes from your CRM'}</span>
-      <span class="muted">${num(total)} leads with a status</span>
+      <span class="muted">${adLeads != null
+        ? `${num(total)} CRM leads matched of ${num(adLeads)} ad leads`
+        : `${num(total)} leads with a status`}</span>
     </div>
     <div class="status-bar">
-      ${entries
-        .map(([status, n]) => {
-          const tone = STATUS_TONE.find(([p]) => p.test(status))?.[1] || 'tone-open';
-          return `<span class="seg ${tone}" style="width:${(n / total) * 100}%"
-            title="${esc(status)}: ${n}"></span>`;
-        })
-        .join('')}
+      ${entries.map(([stage, n]) => `<span class="seg ${STAGE_TONE[stage]}" style="width:${(n / total) * 100}%"
+        title="${esc(stage)}: ${n}"></span>`).join('')}
     </div>
+    <div class="status-legend">
+      ${entries.map(([stage, n]) => `<span class="legend-item"><i class="dot ${STAGE_TONE[stage]}"></i>${esc(stage)}
+        <strong>${num(n)}</strong> <span class="muted">${dec((n / total) * 100, 0)}% of ${num(total)} CRM leads</span></span>`).join('')}
+    </div>
+    ${unmapped.length
+      ? `<p class="crm-note warn">Not counted as any outcome \u2014 nobody has mapped ${
+          unmapped.map(([raw, n]) => `\u201c${esc(raw)}\u201d (${num(n)})`).join(', ')
+        }. Tell me which stage each belongs to and they will be counted.</p>`
+      : ''}
     ${Object.keys(t.crmServices || {}).length
       ? `<p class="crm-note">Counted by the campaign that brought the lead${
           t.crmFromUrl ? ` (${num(t.crmFromUrl)} matched from the landing page URL)` : ''
@@ -211,17 +219,9 @@ function statusStrip(t) {
     ${t.crmUndated
       ? `<p class="crm-note">${num(t.crmUndated)} CRM row${t.crmUndated > 1 ? 's' : ''} had an unreadable date and ${t.crmUndated > 1 ? 'were' : 'was'} left out of this period.</p>`
       : ''}
-    <div class="status-legend">
-      ${entries
-        .map(([status, n]) => {
-          const tone = STATUS_TONE.find(([p]) => p.test(status))?.[1] || 'tone-open';
-          return `<span class="legend-item"><i class="dot ${tone}"></i>${esc(status)}
-            <strong>${num(n)}</strong> <span class="muted">${dec((n / total) * 100, 0)}%</span></span>`;
-        })
-        .join('')}
-    </div>
   </div>`;
 }
+
 
 // ---------------------------------------------------------------------------
 // Trend charts — day-by-day spend and leads, so "is this going up or down"
@@ -709,8 +709,7 @@ function channelBlock(title, data, opts = {}) {
 
   const p = opts.prior || null;
   const pl = opts.prevLabel || 'previous';
-  const d = (cur, prev, lowerIsBetter = false) =>
-    p ? deltaPill(cur, prev, { lowerIsBetter, title: opts.vs || '' }) : '';
+  const d = (metric, cur, prev) => (p ? deltaPill(metric, cur, prev, { title: opts.vs || '' }) : '');
 
   const rows = data.campaigns.length
     ? data.campaigns
@@ -737,42 +736,42 @@ function channelBlock(title, data, opts = {}) {
   return `<section class="channel">
     <h3>${esc(title)}</h3>
     <div class="stats">
-      ${stat('Spend', inr(t.spend), '', '', d(t.spend, p?.spend, true), p ? inr(p.spend) : null, pl)}
+      ${stat('Spend', inr(t.spend), '', '', d('spend', t.spend, p?.spend), p ? inr(p.spend) : null, pl)}
       ${stat('Leads', num(t.leads), title === 'Meta Ads' ? 'Meta lead forms' : 'Google Ads conversions',
-        'accent', d(t.leads, p?.leads), p ? num(p.leads) : null, pl)}
+        'accent', d('leads', t.leads, p?.leads), p ? num(p.leads) : null, pl)}
       ${stat('Qualified', hasQuality ? num(t.qualified) : '—',
-        hasQuality ? `${dec(t.qualifyRate, 0)}% of leads` : 'not tracked', 'accent',
-        hasQuality ? d(t.qualified, p?.qualified) : '',
+        hasQuality ? `${dec(t.qualifyRate, 0)}% of ${num(t.leads)} ad leads` : 'not tracked', 'accent',
+        hasQuality ? d('qualified', t.qualified, p?.qualified) : '',
         p && hasQuality ? num(p.qualified) : null, pl)}
       ${stat('Closed', hasQuality ? num(t.closed) : '—',
-        hasQuality ? `${dec(t.closeRate, 0)}% of qualified` : 'not tracked', 'win',
-        hasQuality ? d(t.closed, p?.closed) : '',
+        hasQuality ? `${dec((t.closed / (t.crmTotal || 1)) * 100, 0)}% of ${num(t.crmTotal)} CRM leads` : 'not tracked', 'win',
+        hasQuality ? d('closed', t.closed, p?.closed) : '',
         p && hasQuality ? num(p.closed) : null, pl)}
       ${stat('Cost per closure', hasQuality && t.closed ? inr(t.cpClosure) : '—', '', '',
-        hasQuality && t.closed ? d(t.cpClosure, p?.cpClosure, true) : '',
+        hasQuality && t.closed ? d('costPerClosure', t.cpClosure, p?.cpClosure) : '',
         p && hasQuality && p.closed ? inr(p.cpClosure) : null, pl)}
     </div>
 
     <details class="more">
       <summary>See more</summary>
       <div class="stats">
-        ${stat('Impressions', num(t.impressions), '', '', d(t.impressions, p?.impressions),
+        ${stat('Impressions', num(t.impressions), '', '', d('impressions', t.impressions, p?.impressions),
           p ? num(p.impressions) : null, pl)}
-        ${stat('Clicks', num(t.clicks), `${dec(t.ctr)}% CTR`, '', d(t.clicks, p?.clicks),
+        ${stat('Clicks', num(t.clicks), `${dec(t.ctr)}% CTR`, '', d('clicks', t.clicks, p?.clicks),
           p ? num(p.clicks) : null, pl)}
         ${stat('Cost per lead', t.leads ? inr(t.cpl) : '—', '', '',
-          t.leads ? d(t.cpl, p?.cpl, true) : '', p && p.leads ? inr(p.cpl) : null, pl)}
+          t.leads ? d('costPerLead', t.cpl, p?.cpl) : '', p && p.leads ? inr(p.cpl) : null, pl)}
         ${stat('Cost per qualified lead', hasQuality && t.qualified ? inr(t.cpql) : '—', '', '',
-          hasQuality && t.qualified ? d(t.cpql, p?.cpql, true) : '',
+          hasQuality && t.qualified ? d('costPerQualified', t.cpql, p?.cpql) : '',
           p && hasQuality && p.qualified ? inr(p.cpql) : null, pl)}
         ${stat('Not qualified', hasQuality ? num(t.disqualified) : '—',
-          hasQuality ? `${dec((t.disqualified / (t.crmTotal || 1)) * 100, 0)}% of CRM leads` : 'not tracked',
-          '', hasQuality ? d(t.disqualified, p?.disqualified, true) : '',
+          hasQuality ? `${dec((t.disqualified / (t.crmTotal || 1)) * 100, 0)}% of ${num(t.crmTotal)} CRM leads` : 'not tracked',
+          '', hasQuality ? d('notQualified', t.disqualified, p?.disqualified) : '',
           p && hasQuality ? num(p.disqualified) : null, pl)}
       </div>
     </details>
 
-    ${t.hasCrm ? statusStrip(t) : ''}
+    ${t.hasCrm ? statusStrip(t, t.leads) : ''}
 
     ${t.pixelLeads || t.messaging
       ? `<p class="aside">
@@ -995,6 +994,9 @@ function clientBlock(client, { internal = false } = {}) {
   // So: if any ad channel is present, the platforms are the only source. The sheet
   // total is used solely when there is no ad channel to speak for.
   const hasAdChannel = Boolean(meta || google);
+  // With one channel the summary row is a copy of that channel's own row, line for
+  // line. Printing both invites the reader to look for a difference that cannot exist.
+  const channelCount = [meta, google].filter(Boolean).length;
   const platformKnowsQuality = Boolean(meta?.hasQualityData || google?.hasQualityData);
 
   const qualified = hasAdChannel
@@ -1030,7 +1032,7 @@ function clientBlock(client, { internal = false } = {}) {
   const pLabel = client.previous
     ? (client.previous.days === 1 ? 'day before' : `prev ${client.previous.days} days`)
     : '';
-  const d = (cur, prev, lowerIsBetter = false) => prior ? deltaPill(cur, prev, { lowerIsBetter, title: vs }) : '';
+  const d = (metric, cur, prev) => (prior ? deltaPill(metric, cur, prev, { title: vs }) : '');
   const cp = (spend, n) => (n ? spend / n : 0);
 
   return `<article class="client">
@@ -1038,26 +1040,26 @@ function clientBlock(client, { internal = false } = {}) {
       <h2>${esc(client.name)}</h2>
       ${sourcesLine(client.sources)}
       ${goalBanner(client.goals)}
-      ${compareLine(client.previous, priorBroke)}
-      <div class="headline">
-        ${stat('Ad spend', inr(spend), '', '', d(spend, prior?.spend, true),
+      ${compareLine(client.previous, priorBroke, client.range)}
+      ${channelCount < 2 ? '' : `<div class="headline">
+        ${stat('Ad spend', inr(spend), '', '', d('spend', spend, prior?.spend),
           prior ? inr(prior.spend) : null, pLabel)}
         ${stat('Leads', num(leadCount), leadCount ? `${inr(spend / leadCount)} per lead` : '', 'accent',
-          d(leadCount, prior?.leads), prior ? num(prior.leads) : null, pLabel)}
+          d('leads', leadCount, prior?.leads), prior ? num(prior.leads) : null, pLabel)}
         ${stat('Qualified', hasQuality ? num(qualified) : '—',
           hasQuality
             ? (qualified ? `${inr(spend / qualified)} per qualified lead` : 'none yet in this period')
-            : 'not tracked', 'accent', hasQuality ? d(qualified, prior?.qualified) : '',
+            : 'not tracked', 'accent', hasQuality ? d('qualified', qualified, prior?.qualified) : '',
           prior && hasQuality ? num(prior.qualified) : null, pLabel)}
         ${stat('Closed', hasQuality ? num(closed) : '—',
           hasQuality
             ? (closed ? `${inr(spend / closed)} per closure` : 'none yet in this period')
-            : 'not tracked', 'win', hasQuality ? d(closed, prior?.closed) : '',
+            : 'not tracked', 'win', hasQuality ? d('closed', closed, prior?.closed) : '',
           prior && hasQuality ? num(prior.closed) : null, pLabel)}
         ${stat('Cost per closure', hasQuality && closed ? inr(spend / closed) : '—', '', '',
-          hasQuality && closed ? d(cp(spend, closed), cp(prior?.spend, prior?.closed), true) : '',
+          hasQuality && closed ? d('costPerClosure', cp(spend, closed), cp(prior?.spend, prior?.closed)) : '',
           prior && hasQuality && prior.closed ? inr(cp(prior.spend, prior.closed)) : null, pLabel)}
-      </div>
+      </div>`}
     </header>
     ${channelBlock('Meta Ads', client.meta, { hasQuality, daily: client.metaDaily, prior: pm, vs, prevLabel: pLabel })}
     ${channelBlock('Google Ads', client.googleAds, { hasQuality, daily: client.googleDaily, prior: pg, vs, prevLabel: pLabel })}
@@ -1279,11 +1281,15 @@ export function renderReport({ clients, since, until, generatedAt, internal = fa
   .status-bar { display:flex; height:12px; border-radius:6px; overflow:hidden;
     background:var(--line); margin-bottom:10px; }
   .seg { display:block; height:100%; }
-  .tone-closed { background:var(--red); }
-  .tone-qualified { background:var(--navy); }
-  .tone-open { background:var(--orange); }
-  .tone-cold { background:#9aa6c2; }
-  .tone-bad { background:#c9d0e0; }
+  /* One colour per stage, all distinct. Sequenced from won to worthless so the bar
+     reads left to right as the pipeline drains. */
+  .stage-closed { background:#0b6b3a; }
+  .stage-qualified { background:var(--navy); }
+  .stage-inprogress { background:var(--orange); }
+  .stage-noresponse { background:#9aa6c2; }
+  .stage-notqualified { background:#c9d0e0; }
+  .stage-junk { background:var(--red); }
+  .stage-unmapped { background:#6b3fa0; }
   .status-legend { display:flex; flex-wrap:wrap; gap:6px 16px; font-size:12.5px; }
   .legend-item { display:inline-flex; align-items:center; gap:5px; }
   .dot { width:9px; height:9px; border-radius:3px; display:inline-block; }

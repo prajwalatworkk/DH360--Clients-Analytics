@@ -198,15 +198,16 @@ export function totalsOf(campaigns) {
       disqualified: add(acc.disqualified, c.disqualified),
       unreached: add(acc.unreached, c.unreached),
       inProgress: add(acc.inProgress, c.inProgress),
-      newEnquiry: add(acc.newEnquiry, c.newEnquiry),
       crmUndated: add(acc.crmUndated, c.crmUndated),
+      crmUnmapped: add(acc.crmUnmapped, c.crmUnmapped),
+      crmMatched: add(acc.crmMatched, c.crmMatched),
       otherStatus: add(acc.otherStatus, c.otherStatus),
       crmTotal: add(acc.crmTotal, c.crmTotal),
     }),
     {
       spend: 0, impressions: 0, clicks: 0, leads: 0, pixelLeads: 0, messaging: 0,
       qualified: 0, closed: 0, junk: 0, disqualified: 0, unreached: 0,
-      inProgress: 0, newEnquiry: 0, otherStatus: 0, crmUndated: 0, crmTotal: 0,
+      inProgress: 0, crmUndated: 0, crmUnmapped: 0, crmMatched: 0, crmTotal: 0,
     },
   );
   t.hasCrm = campaigns.some((c) => c.hasCrm);
@@ -228,11 +229,15 @@ export function totalsOf(campaigns) {
   // zero ("nothing closed yet") must not read as "no data", or a fallback source
   // gets substituted for it and reports a number that belongs to something else.
   t.hasQualityData = campaigns.some((c) => c.qualified != null || c.closed != null);
-  // Merge every campaign's status breakdown into one account-level view.
-  t.statuses = {};
+  // Merge every campaign's stage breakdown into one account-level view.
+  t.stages = {};
+  t.unmappedValues = {};
   for (const c of campaigns) {
-    for (const [status, n] of Object.entries(c.statuses || {})) {
-      t.statuses[status] = (t.statuses[status] || 0) + n;
+    for (const [stage, n] of Object.entries(c.stages || {})) {
+      t.stages[stage] = (t.stages[stage] || 0) + n;
+    }
+    for (const [raw, n] of Object.entries(c.unmappedValues || {})) {
+      t.unmappedValues[raw] = (t.unmappedValues[raw] || 0) + n;
     }
   }
   return withRates(t);
