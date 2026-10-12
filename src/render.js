@@ -750,15 +750,15 @@ function channelBlock(title, data, opts = {}) {
         hasQuality ? `${dec((t.closed / (t.crmTotal || 1)) * 100, 0)}% of ${num(t.crmTotal)} CRM leads` : 'not tracked', 'win',
         hasQuality ? d('closed', t.closed, p?.closed) : '',
         p && hasQuality ? num(p.closed) : null, pl)}
+      ${stat('Cost per closure', hasQuality && t.closed ? inr(t.cpClosure) : '—', '', '',
+        hasQuality && t.closed ? d('costPerClosure', t.cpClosure, p?.cpClosure) : '',
+        p && hasQuality && p.closed ? inr(p.cpClosure) : null, pl)}
     </div>
 
     <details class="more">
       <summary>See more</summary>
       <div class="stats">
         ${stat('Spend', inr(t.spend), '', '', d('spend', t.spend, p?.spend), p ? inr(p.spend) : null, pl)}
-        ${stat('Cost per closure', hasQuality && t.closed ? inr(t.cpClosure) : '—', '', '',
-          hasQuality && t.closed ? d('costPerClosure', t.cpClosure, p?.cpClosure) : '',
-          p && hasQuality && p.closed ? inr(p.cpClosure) : null, pl)}
         ${stat('Impressions', num(t.impressions), '', '', d('impressions', t.impressions, p?.impressions),
           p ? num(p.impressions) : null, pl)}
         ${stat('Clicks', num(t.clicks), `${dec(t.ctr)}% CTR`, '', d('clicks', t.clicks, p?.clicks),
@@ -1058,6 +1058,9 @@ function clientBlock(client, { internal = false } = {}) {
             ? (closed ? `${inr(spend / closed)} per closure` : 'none yet in this period')
             : 'not tracked', 'win', hasQuality ? d('closed', closed, prior?.closed) : '',
           prior && hasQuality ? num(prior.closed) : null, pLabel)}
+        ${stat('Cost per closure', hasQuality && closed ? inr(spend / closed) : '—', '', '',
+          hasQuality && closed ? d('costPerClosure', cp(spend, closed), cp(prior?.spend, prior?.closed)) : '',
+          prior && hasQuality && prior.closed ? inr(cp(prior.spend, prior.closed)) : null, pLabel)}
       </div>`}
     </header>
     ${channelBlock('Meta Ads', client.meta, { hasQuality, daily: client.metaDaily, prior: pm, vs, prevLabel: pLabel })}
