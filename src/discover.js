@@ -1,7 +1,7 @@
 // Auto-discovers every ad account the logged-in credentials can actually see,
 // so you never hand-maintain a client list.
 
-import { accessToken, API_VERSION as GADS_VERSION } from './googleAds.js';
+import { accessToken, API_VERSION as GADS_VERSION, explainGoogleError } from './googleAds.js';
 import { balanceOf, paceOf } from './balance.js';
 import { readStore, remainingFrom, dayAfter, todayLocal } from './manualBalance.js';
 
@@ -171,7 +171,10 @@ export async function discoverGoogleAds() {
       const body = await res.json();
       if (!res.ok) {
         const msg = Array.isArray(body) ? body[0]?.error?.message : body?.error?.message;
-        return { accounts: [], error: msg || `Google Ads API returned ${res.status}` };
+        return {
+          accounts: [],
+          error: explainGoogleError(msg, res.status) || `Google Ads API returned ${res.status}`,
+        };
       }
       const rows = (Array.isArray(body) ? body : [body]).flatMap((c) => c.results || []);
       const accounts = rows
@@ -197,7 +200,11 @@ export async function discoverGoogleAds() {
     );
     const body = await res.json();
     if (!res.ok) {
-      return { accounts: [], error: body?.error?.message || `Google Ads API returned ${res.status}` };
+      return {
+        accounts: [],
+        error: explainGoogleError(body?.error?.message, res.status)
+          || `Google Ads API returned ${res.status}`,
+      };
     }
     const accounts = (body.resourceNames || []).map((rn) => {
       const id = rn.split('/').pop();

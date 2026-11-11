@@ -1,7 +1,7 @@
 // Lists the campaigns inside one ad account, so you can pick individual campaigns
 // rather than reporting on the whole account.
 
-import { accessToken, API_VERSION as GADS_VERSION } from './googleAds.js';
+import { accessToken, API_VERSION as GADS_VERSION, explainGoogleError } from './googleAds.js';
 
 export async function listMetaCampaigns(accountId) {
   const token = process.env.META_ACCESS_TOKEN;
@@ -64,7 +64,7 @@ export async function listGoogleCampaigns(customerId) {
   const body = await res.json();
   if (!res.ok) {
     const msg = Array.isArray(body) ? body[0]?.error?.message : body?.error?.message;
-    return { error: msg || `Google Ads API returned ${res.status}` };
+    return { error: explainGoogleError(msg, res.status) || `Google Ads API returned ${res.status}` };
   }
 
   const rows = (Array.isArray(body) ? body : [body]).flatMap((c) => c.results || []);

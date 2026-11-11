@@ -1,7 +1,20 @@
 // Google Ads campaign performance via the Google Ads REST API (searchStream).
 import { totalsOf } from './meta.js';
 
-export const API_VERSION = 'v22';
+// Google sunsets an API version roughly every four months, and a sunset one answers
+// every request with "Request contains an invalid argument" — which reads as a bug in
+// the query, not as an expired version. This has now broken the tool twice (v18, v22),
+// so the version is settable without a code change and the error says what happened.
+export const API_VERSION = process.env.GOOGLE_ADS_API_VERSION || 'v25';
+
+// Turns Google's generic complaint into the thing to actually do about it.
+export function explainGoogleError(message, status) {
+  if (status === 400 && /invalid argument/i.test(message || '')) {
+    return `Google Ads rejected the request on API ${API_VERSION}. That version has most `
+      + 'likely been sunset \u2014 set GOOGLE_ADS_API_VERSION in .env to a newer one.';
+  }
+  return message;
+}
 
 export async function accessToken() {
   const res = await fetch('https://oauth2.googleapis.com/token', {
@@ -95,7 +108,7 @@ export async function fetchGoogleAds(client, { since, until }, level = 'campaign
   const body = await res.json();
   if (!res.ok) {
     const msg = Array.isArray(body) ? body[0]?.error?.message : body?.error?.message;
-    return { error: msg || `Google Ads API returned ${res.status}` };
+    return { error: explainGoogleError(msg, res.status) || `Google Ads API returned ${res.status}` };
   }
 
   const rows = (Array.isArray(body) ? body : [body]).flatMap((chunk) => chunk.results || []);
